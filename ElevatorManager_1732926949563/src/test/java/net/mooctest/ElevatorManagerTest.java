@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Observer;
 import java.util.Queue;
 import java.util.Set;
@@ -17,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -108,6 +110,17 @@ public class ElevatorManagerTest {
         field.set(target, value);
     }
 
+    private void awaitCondition(BooleanSupplier condition, long timeoutMillis, String failureMessage) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(20L);
+        }
+        fail(failureMessage);
+    }
+
     @Test
     public void testSystemConfigValidationAndDefaults() {
         // 中文注释：验证系统配置的默认值以及非法输入保护逻辑
@@ -167,6 +180,17 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testAnalyticsEnginePassengerCountUpdatesOverride() {
+        // 中文注释：验证同一楼层的乘客统计会被最新数据覆盖
+        AnalyticsEngine engine = AnalyticsEngine.getInstance();
+        engine.updateFloorPassengerCount(3, 10);
+        engine.updateFloorPassengerCount(3, 5);
+        assertFalse("少量等待乘客不应触发高峰", engine.isPeakHours());
+        engine.updateFloorPassengerCount(4, 60);
+        assertTrue("单层大量乘客应立即触发高峰", engine.isPeakHours());
+    }
+
+    @Test
     public void testCoreEventValueObject() {
         // 中文注释：验证业务事件对象携带类型与数据的能力
         Event event = new Event(EventType.CONFIG_UPDATED, "payload");
@@ -188,6 +212,17 @@ public class ElevatorManagerTest {
         // 发布无人订阅的事件以覆盖空分支
         bus.publish(new EventBus.Event(EventType.MAINTENANCE_REQUIRED, "noop"));
         assertSame(event, captured.get());
+    }
+
+    @Test
+    public void testEventBusNotifiesAllListeners() {
+        // 中文注释：验证同一事件的多个监听器都会收到通知
+        EventBus bus = EventBus.getInstance();
+        AtomicInteger counter = new AtomicInteger();
+        bus.subscribe(EventType.ELEVATOR_FAULT, event -> counter.addAndGet(1));
+        bus.subscribe(EventType.ELEVATOR_FAULT, event -> counter.addAndGet(2));
+        bus.publish(new EventBus.Event(EventType.ELEVATOR_FAULT, "fault"));
+        assertEquals(3, counter.get());
     }
 
     @Test
@@ -231,6 +266,18 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testLogManagerQueryOutsideWindowReturnsEmpty() {
+        // 中文注释：验证时间窗口与来源不匹配时返回空集合
+        LogManager manager = LogManager.getInstance();
+        String source = "Coverage" + System.nanoTime();
+        manager.recordEvent(source, "message");
+        long futureStart = System.currentTimeMillis() + 1000;
+        long futureEnd = futureStart + 1000;
+        List<LogManager.SystemLog> logs = manager.queryLogs(source, futureStart, futureEnd);
+        assertTrue(logs.isEmpty());
+    }
+
+    @Test
     public void testNotificationServiceCustomChannel() throws Exception {
         // 中文注释：通过注入自定义通道验证通知路由逻辑
         NotificationService service = NotificationService.getInstance();
@@ -261,6 +308,62 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testNotificationServiceDefaultChannelsSupportMatrix() throws Exception {
+        // 中文注释：验证默认通道的支持矩阵以及只向支持的通道发送
+        NotificationService.SMSChannel smsChannel = new NotificationService.SMSChannel();
+        assertTrue(smsChannel.supports(NotificationService.NotificationType.EMERGENCY));
+        assertTrue(smsChannel.supports(NotificationService.NotificationType.MAINTENANCE));
+        assertFalse(smsChannel.supports(NotificationService.NotificationType.INFORMATION));
+
+        NotificationService.EmailChannel emailChannel = new NotificationService.EmailChannel();
+        for (NotificationService.NotificationType type : NotificationService.NotificationType.values()) {
+            assertTrue(emailChannel.supports(type));
+        }
+
+        NotificationService service = NotificationService.getInstance();
+        @SuppressWarnings("unchecked")
+        List<NotificationService.NotificationChannel> channels = getPrivateField(service, "channels");
+        List<NotificationService.NotificationChannel> backup = new ArrayList<>(channels);
+        AtomicReference<NotificationService.Notification> captured = new AtomicReference<>();
+        NotificationService.NotificationChannel denyChannel = new NotificationService.NotificationChannel() {
+            @Override
+            public boolean supports(NotificationService.NotificationType type) {
+                return false;
+            }
+
+            @Override
+            public void send(NotificationService.Notification notification) {
+                fail("不支持的通道不应被调用");
+            }
+        };
+        NotificationService.NotificationChannel acceptChannel = new NotificationService.NotificationChannel() {
+            @Override
+            public boolean supports(NotificationService.NotificationType type) {
+                return true;
+            }
+
+            @Override
+            public void send(NotificationService.Notification notification) {
+                captured.set(notification);
+            }
+        };
+        channels.clear();
+        channels.add(denyChannel);
+        channels.add(acceptChannel);
+        try {
+            NotificationService.Notification emergency = new NotificationService.Notification(
+                    NotificationService.NotificationType.EMERGENCY,
+                    "紧急广播",
+                    Arrays.asList("duty@building.com"));
+            service.sendNotification(emergency);
+            assertSame(emergency, captured.get());
+        } finally {
+            channels.clear();
+            channels.addAll(backup);
+        }
+    }
+
+    @Test
     public void testPassengerRequestDerivedValues() {
         // 中文注释：验证乘客请求自动推导方向与字符串格式
         PassengerRequest up = new PassengerRequest(1, 5, Priority.HIGH, RequestType.DESTINATION_CONTROL);
@@ -273,6 +376,17 @@ public class ElevatorManagerTest {
         PassengerRequest down = new PassengerRequest(6, 2, Priority.LOW, RequestType.STANDARD);
         assertEquals(Direction.DOWN, down.getDirection());
         assertEquals(SpecialNeeds.NONE, down.getSpecialNeeds());
+    }
+
+    @Test
+    public void testPassengerRequestSameFloorDefaultsDownDirection() throws InterruptedException {
+        // 中文注释：验证起止楼层相同的边界情况默认视为向下请求
+        PassengerRequest stay = new PassengerRequest(4, 4, Priority.MEDIUM, RequestType.STANDARD);
+        assertEquals(Direction.DOWN, stay.getDirection());
+        long firstTimestamp = stay.getTimestamp();
+        Thread.sleep(2L);
+        PassengerRequest later = new PassengerRequest(4, 4, Priority.MEDIUM, RequestType.STANDARD);
+        assertTrue("时间戳应保持单调递增", later.getTimestamp() >= firstTimestamp);
     }
 
     @Test
@@ -290,6 +404,18 @@ public class ElevatorManagerTest {
 
         double cost = strategy.calculatePredictedCost(e2, request);
         assertTrue("成本计算应包含距离和负载", cost > Math.abs(e2.getCurrentFloor() - request.getStartFloor()));
+    }
+
+    @Test
+    public void testPredictiveStrategyCostFormula() throws Exception {
+        // 中文注释：验证预测成本计算严格遵循距离+负载因子
+        PredictiveSchedulingStrategy strategy = new PredictiveSchedulingStrategy();
+        Elevator elevator = createElevator(7, 2);
+        setPassengerCount(elevator, 7);
+        PassengerRequest request = new PassengerRequest(6, 9, Priority.MEDIUM, RequestType.STANDARD);
+        double expected = Math.abs(elevator.getCurrentFloor() - request.getStartFloor())
+                + (elevator.getPassengerList().size() / elevator.getMaxLoad()) * 10;
+        assertEquals(expected, strategy.calculatePredictedCost(elevator, request), 0.0001);
     }
 
     @Test
@@ -315,6 +441,21 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testNearestStrategyPrefersFirstWhenDistanceTies() {
+        // 中文注释：验证当距离相等时不会更换已选电梯
+        NearestElevatorStrategy strategy = new NearestElevatorStrategy();
+        PassengerRequest request = new PassengerRequest(4, 10, Priority.MEDIUM, RequestType.STANDARD);
+        Elevator first = createElevator(10, 2);
+        Elevator second = createElevator(11, 6);
+        first.setStatus(ElevatorStatus.IDLE);
+        second.setStatus(ElevatorStatus.MOVING);
+        second.setDirection(Direction.UP);
+        List<Elevator> elevators = Arrays.asList(first, second);
+        Elevator chosen = strategy.selectElevator(elevators, request);
+        assertSame("距离相等时应保留先选的电梯", first, chosen);
+    }
+
+    @Test
     public void testEnergySavingStrategyBranches() {
         // 中文注释：验证节能策略优先空闲，其次同向靠近，最后返回空
         EnergySavingStrategy strategy = new EnergySavingStrategy();
@@ -334,6 +475,20 @@ public class ElevatorManagerTest {
         moving.setDirection(Direction.DOWN);
         moving.setCurrentFloor(20);
         assertNull(strategy.selectElevator(Arrays.asList(idle, moving), request));
+    }
+
+    @Test
+    public void testEnergySavingStrategyReturnsNullWhenNoConditionsMatch() {
+        // 中文注释：验证两个循环均不满足时确实返回null
+        EnergySavingStrategy strategy = new EnergySavingStrategy();
+        Elevator first = createElevator(1, 12);
+        Elevator second = createElevator(2, 20);
+        first.setStatus(ElevatorStatus.MOVING);
+        second.setStatus(ElevatorStatus.MOVING);
+        first.setDirection(Direction.DOWN);
+        second.setDirection(Direction.UP);
+        PassengerRequest request = new PassengerRequest(5, 1, Priority.LOW, RequestType.STANDARD);
+        assertNull(strategy.selectElevator(Arrays.asList(first, second), request));
     }
 
     @Test
@@ -432,6 +587,31 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testSchedulerExecuteEmergencyProtocolInvokesAll() {
+        // 中文注释：验证应急协议会逐一调用所有电梯的应急流程
+        Elevator e1 = Mockito.spy(createElevator(1, 3));
+        Elevator e2 = Mockito.spy(createElevator(2, 8));
+        List<Elevator> elevators = new ArrayList<>();
+        elevators.add(e1);
+        elevators.add(e2);
+        Scheduler scheduler = new Scheduler(elevators, 1, new NearestElevatorStrategy());
+        scheduler.executeEmergencyProtocol();
+        Mockito.verify(e1).handleEmergency();
+        Mockito.verify(e2).handleEmergency();
+    }
+
+    @Test
+    public void testSchedulerDefaultSingletonInitialization() throws Exception {
+        // 中文注释：验证无参单例模式下的默认结构
+        Scheduler scheduler = Scheduler.getInstance();
+        @SuppressWarnings("unchecked")
+        List<Elevator> elevatorList = getPrivateField(scheduler, "elevatorList");
+        Map<Integer, Floor> floors = getPrivateField(scheduler, "floors");
+        assertNotNull(elevatorList);
+        assertTrue(floors.isEmpty());
+    }
+
+    @Test
     public void testElevatorInitialStateAndObservers() {
         // 中文注释：验证电梯初始状态及观察者通知
         Elevator elevator = createElevator(5, 1);
@@ -446,6 +626,22 @@ public class ElevatorManagerTest {
         elevator.addObserver(observer);
         elevator.notifyObservers(new Event(EventType.MAINTENANCE_REQUIRED, "test"));
         assertEquals(EventType.MAINTENANCE_REQUIRED, observed.get());
+    }
+
+    @Test
+    public void testElevatorStateMutatorsAffectFields() {
+        // 中文注释：验证各种setter会正确影响状态
+        Elevator elevator = createElevator(9, 4);
+        elevator.setMode(ElevatorMode.ENERGY_SAVING);
+        elevator.setEnergyConsumption(42.5);
+        elevator.setCurrentLoad(150.0);
+        elevator.setStatus(ElevatorStatus.MOVING);
+        elevator.setDirection(Direction.DOWN);
+        assertEquals(ElevatorMode.ENERGY_SAVING, elevator.getMode());
+        assertEquals(42.5, elevator.getEnergyConsumption(), 0.0001);
+        assertEquals(150.0, elevator.getCurrentLoad(), 0.0001);
+        assertEquals(ElevatorStatus.MOVING, elevator.getStatus());
+        assertEquals(Direction.DOWN, elevator.getDirection());
     }
 
     @Test
@@ -465,6 +661,24 @@ public class ElevatorManagerTest {
         elevator.move();
         assertEquals(2, elevator.getCurrentFloor());
         assertEquals(Direction.DOWN, elevator.getDirection());
+    }
+
+    @Test
+    public void testElevatorOpenDoorStandalone() throws Exception {
+        // 中文注释：直接调用开门流程以覆盖停梯状态
+        Scheduler schedulerMock = Mockito.mock(Scheduler.class);
+        Elevator elevator = new Elevator(20, schedulerMock);
+        elevator.setCurrentFloor(6);
+        Field passengerField = Elevator.class.getDeclaredField("passengerList");
+        passengerField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<PassengerRequest> passengerList = (List<PassengerRequest>) passengerField.get(elevator);
+        passengerList.add(new PassengerRequest(1, 6, Priority.LOW, RequestType.STANDARD));
+        Mockito.when(schedulerMock.getRequestsAtFloor(Mockito.anyInt(), Mockito.any(Direction.class)))
+                .thenReturn(Collections.emptyList());
+        elevator.openDoor();
+        assertEquals(ElevatorStatus.STOPPED, elevator.getStatus());
+        assertTrue(elevator.getPassengerList().isEmpty());
     }
 
     @Test
@@ -643,6 +857,41 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testMaintenanceManagerBackgroundThreadProcessesTasks() throws Exception {
+        // 中文注释：验证真实后台线程能够消费队列并写入记录
+        MaintenanceManager manager = new MaintenanceManager();
+        Elevator elevator = createElevator(50, 9);
+        manager.scheduleMaintenance(elevator);
+        awaitCondition(() -> {
+            try {
+                List<MaintenanceManager.MaintenanceRecord> records = getPrivateField(manager, "maintenanceRecords");
+                return !records.isEmpty();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, 2000, "后台维护线程未及时写入记录");
+        List<MaintenanceManager.MaintenanceRecord> records = getPrivateField(manager, "maintenanceRecords");
+        assertFalse(records.isEmpty());
+        ExecutorService executor = getPrivateField(manager, "executorService");
+        executor.shutdownNow();
+    }
+
+    @Test
+    public void testMaintenanceManagerOnEventIgnoresNonFault() {
+        // 中文注释：验证非故障事件不会触发维护任务
+        TestMaintenanceManager manager = new TestMaintenanceManager();
+        manager.onEvent(new EventBus.Event(EventType.MAINTENANCE_REQUIRED, createElevator(60, 3)));
+        manager.processTasks();
+        assertTrue(manager.getNotified().isEmpty());
+        try {
+            ExecutorService executor = getPrivateField(manager, "executorService");
+            executor.shutdownNow();
+        } catch (Exception e) {
+            fail("无法关闭维护管理器线程: " + e.getMessage());
+        }
+    }
+
+    @Test
     public void testSecurityMonitorHandlesEmergencyEvent() throws Exception {
         // 中文注释：验证安全监控可响应事件并触发后续流程
         class StubScheduler extends Scheduler {
@@ -689,8 +938,43 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testSecurityMonitorIgnoresNonEmergencyEvents() throws Exception {
+        // 中文注释：验证非EMERGENCY事件不触发任何动作
+        SecurityMonitor monitor = new SecurityMonitor();
+        NotificationService service = NotificationService.getInstance();
+        @SuppressWarnings("unchecked")
+        List<NotificationService.NotificationChannel> channels = getPrivateField(service, "channels");
+        List<NotificationService.NotificationChannel> backup = new ArrayList<>(channels);
+        AtomicInteger counter = new AtomicInteger();
+        NotificationService.NotificationChannel countingChannel = new NotificationService.NotificationChannel() {
+            @Override
+            public boolean supports(NotificationService.NotificationType type) {
+                return true;
+            }
+
+            @Override
+            public void send(NotificationService.Notification notification) {
+                counter.incrementAndGet();
+            }
+        };
+        channels.clear();
+        channels.add(countingChannel);
+        try {
+            monitor.onEvent(new EventBus.Event(EventType.MAINTENANCE_REQUIRED, "noop"));
+            List<SecurityMonitor.SecurityEvent> events = getPrivateField(monitor, "securityEvents");
+            assertTrue(events.isEmpty());
+            assertEquals(0, counter.get());
+        } finally {
+            channels.clear();
+            channels.addAll(backup);
+            ExecutorService executor = getPrivateField(monitor, "executorService");
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     public void testThreadPoolManagerTaskExecution() throws InterruptedException {
-        // 中文注释：验证线程池能够正确执行任务并在关闭后退出
+
         ThreadPoolManager manager = new ThreadPoolManager();
         CountDownLatch latch = new CountDownLatch(1);
         manager.submitTask(latch::countDown);
@@ -723,5 +1007,20 @@ public class ElevatorManagerTest {
         Mockito.verify(interruptedExecutor).shutdownNow();
         assertTrue(Thread.currentThread().isInterrupted());
         Thread.interrupted(); // 清理中断标记，避免影响后续测试
+    }
+
+    @Test
+    public void testThreadPoolManagerShutdownSuccessPath() throws Exception {
+        // 中文注释：验证正常关闭时不会调用shutdownNow
+        ThreadPoolManager manager = new ThreadPoolManager();
+        ExecutorService executor = Mockito.mock(ExecutorService.class);
+        Mockito.when(executor.awaitTermination(ArgumentMatchers.anyLong(), ArgumentMatchers.any(TimeUnit.class)))
+                .thenReturn(true);
+        ExecutorService original = getPrivateField(manager, "executorService");
+        original.shutdownNow();
+        setPrivateField(manager, "executorService", executor);
+        manager.shutdown();
+        Mockito.verify(executor).shutdown();
+        Mockito.verify(executor, Mockito.never()).shutdownNow();
     }
 }
