@@ -278,6 +278,19 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testLogManagerQueryBoundaryInclusive() throws Exception {
+        // 中文注释：验证时间边界是闭区间
+        LogManager manager = LogManager.getInstance();
+        @SuppressWarnings("unchecked")
+        List<LogManager.SystemLog> logs = getPrivateField(manager, "logs");
+        long timestamp = System.currentTimeMillis();
+        logs.add(new LogManager.SystemLog("BoundarySource", "hit", timestamp));
+        List<LogManager.SystemLog> result = manager.queryLogs("BoundarySource", timestamp, timestamp);
+        assertEquals(1, result.size());
+        assertEquals("hit", result.get(0).getMessage());
+    }
+
+    @Test
     public void testNotificationServiceCustomChannel() throws Exception {
         // 中文注释：通过注入自定义通道验证通知路由逻辑
         NotificationService service = NotificationService.getInstance();
@@ -541,6 +554,29 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testSchedulerGetRequestsAtFloorUpDirection() throws Exception {
+        // 中文注释：验证向上请求能够正确排队并被取出
+        Elevator elevator = createElevator(12, 1);
+        Scheduler scheduler = new Scheduler(Collections.singletonList(elevator), 10, (list, request) -> list.get(0));
+        PassengerRequest upRequest = new PassengerRequest(4, 9, Priority.MEDIUM, RequestType.STANDARD);
+        scheduler.submitRequest(upRequest);
+        List<PassengerRequest> upList = scheduler.getRequestsAtFloor(4, Direction.UP);
+        assertEquals(1, upList.size());
+        assertSame(upRequest, upList.get(0));
+        assertTrue(scheduler.getRequestsAtFloor(4, Direction.UP).isEmpty());
+    }
+
+    @Test
+    public void testSchedulerDispatchElevatorWhenStrategyReturnsNull() {
+        // 中文注释：验证策略返回null时不会向任何电梯添加目的地
+        Elevator spyElevator = Mockito.spy(createElevator(8, 1));
+        Scheduler scheduler = new Scheduler(Collections.singletonList(spyElevator), 5, (list, request) -> null);
+        PassengerRequest request = new PassengerRequest(2, 9, Priority.MEDIUM, RequestType.STANDARD);
+        scheduler.dispatchElevator(request);
+        Mockito.verify(spyElevator, Mockito.never()).addDestination(Mockito.anyInt());
+    }
+
+    @Test
     public void testSchedulerUpdateHandlesFaultAndEmergency() throws Exception {
         // 中文注释：验证调度器的事件处理能够分发故障请求并触发应急协议
         Elevator dispatched = createElevator(2, 4);
@@ -568,6 +604,22 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testSchedulerUpdateIgnoresOtherEvents() {
+        // 中文注释：验证非故障和紧急事件不会触发重新调度
+        Elevator elevator = Mockito.spy(createElevator(6, 2));
+        List<Elevator> elevators = Collections.singletonList(elevator);
+        AtomicInteger dispatchCount = new AtomicInteger();
+        DispatchStrategy strategy = (list, request) -> {
+            dispatchCount.incrementAndGet();
+            return list.get(0);
+        };
+        Scheduler scheduler = new Scheduler(elevators, 3, strategy);
+        scheduler.update(elevator, new Event(EventType.MAINTENANCE_REQUIRED, null));
+        assertEquals(0, dispatchCount.get());
+        Mockito.verify(elevator, Mockito.never()).handleEmergency();
+    }
+
+    @Test
     public void testSchedulerStrategySwitchAndSingletons() {
         // 中文注释：验证调度策略动态切换以及两个工厂方法
         List<Elevator> elevators = Collections.singletonList(createElevator(1, 1));
@@ -584,6 +636,25 @@ public class ElevatorManagerTest {
         Scheduler singleton = Scheduler.getInstance(elevators, 2, first);
         Scheduler singletonAgain = Scheduler.getInstance();
         assertSame(singleton, singletonAgain);
+    }
+
+    @Test
+    public void testSchedulerStrategySwapTakesEffect() {
+        // 中文注释：验证切换策略后会立即使用新的选择结果
+        Elevator firstElevator = createElevator(4, 1);
+        Elevator secondElevator = createElevator(5, 6);
+        List<Elevator> elevators = Arrays.asList(firstElevator, secondElevator);
+        Scheduler scheduler = new Scheduler(elevators, 6, (list, request) -> list.get(0));
+
+        PassengerRequest firstRequest = new PassengerRequest(2, 5, Priority.LOW, RequestType.STANDARD);
+        scheduler.dispatchElevator(firstRequest);
+        assertTrue(firstElevator.getDestinationSet().contains(firstRequest.getStartFloor()));
+
+        scheduler.setDispatchStrategy((list, request) -> list.get(1));
+        PassengerRequest secondRequest = new PassengerRequest(3, 8, Priority.MEDIUM, RequestType.STANDARD);
+        scheduler.dispatchElevator(secondRequest);
+        assertTrue(secondElevator.getDestinationSet().contains(secondRequest.getStartFloor()));
+        assertFalse(secondElevator.getDestinationSet().contains(firstRequest.getStartFloor()));
     }
 
     @Test
@@ -626,6 +697,24 @@ public class ElevatorManagerTest {
         elevator.addObserver(observer);
         elevator.notifyObservers(new Event(EventType.MAINTENANCE_REQUIRED, "test"));
         assertEquals(EventType.MAINTENANCE_REQUIRED, observed.get());
+    }
+
+    @Test
+    public void testElevatorHandleEmergencySendsStatusNotification() throws Exception {
+        // 中文注释：验证紧急处理会清空数据并通知观察者
+        Elevator elevator = createElevator(21, 7);
+        AtomicReference<Object> observed = new AtomicReference<>();
+        elevator.addObserver((o, arg) -> observed.set(arg));
+        Field passengerField = Elevator.class.getDeclaredField("passengerList");
+        passengerField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<PassengerRequest> passengerList = (List<PassengerRequest>) passengerField.get(elevator);
+        passengerList.add(new PassengerRequest(1, 2, Priority.LOW, RequestType.STANDARD));
+        elevator.getDestinationSet().add(9);
+        elevator.handleEmergency();
+        assertEquals(ElevatorStatus.EMERGENCY, observed.get());
+        assertTrue(elevator.getPassengerList().isEmpty());
+        assertEquals(Collections.singleton(1), new TreeSet<>(elevator.getDestinationSet()));
     }
 
     @Test
@@ -721,6 +810,27 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testElevatorLoadPassengersRespectsMaxLoad() throws Exception {
+        // 中文注释：验证载客量达到上限时不会继续装载
+        Scheduler schedulerMock = Mockito.mock(Scheduler.class);
+        Elevator elevator = new Elevator(30, schedulerMock);
+        elevator.setCurrentFloor(9);
+        Mockito.when(schedulerMock.getRequestsAtFloor(9, Direction.UP))
+                .thenReturn(Arrays.asList(
+                        new PassengerRequest(9, 10, Priority.LOW, RequestType.STANDARD),
+                        new PassengerRequest(9, 12, Priority.MEDIUM, RequestType.STANDARD)));
+        elevator.setCurrentLoad(elevator.getMaxLoad());
+        Field passengerField = Elevator.class.getDeclaredField("passengerList");
+        passengerField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<PassengerRequest> passengerList = (List<PassengerRequest>) passengerField.get(elevator);
+        passengerList.clear();
+        elevator.loadPassengers();
+        assertTrue(passengerList.isEmpty());
+        assertTrue(elevator.getDestinationSet().isEmpty());
+    }
+
+    @Test
     public void testElevatorDestinationsAndClearRequests() throws Exception {
         // 中文注释：验证目的地集合为TreeSet并且清空请求时返回副本
         Elevator elevator = createElevator(3, 1);
@@ -737,6 +847,25 @@ public class ElevatorManagerTest {
         passengerList.add(new PassengerRequest(1, 3, Priority.LOW, RequestType.STANDARD));
         List<PassengerRequest> cleared = elevator.clearAllRequests();
         assertEquals(1, cleared.size());
+        assertTrue(elevator.getDestinationSet().isEmpty());
+    }
+
+    @Test
+    public void testElevatorClearAllRequestsReturnsIndependentCopy() throws Exception {
+        // 中文注释：验证clearAllRequests返回的集合与内部状态完全隔离
+        Elevator elevator = createElevator(31, 2);
+        Field passengerField = Elevator.class.getDeclaredField("passengerList");
+        passengerField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<PassengerRequest> passengerList = (List<PassengerRequest>) passengerField.get(elevator);
+        passengerList.add(new PassengerRequest(2, 5, Priority.LOW, RequestType.STANDARD));
+        passengerList.add(new PassengerRequest(3, 6, Priority.MEDIUM, RequestType.STANDARD));
+        elevator.getDestinationSet().add(7);
+        elevator.getDestinationSet().add(9);
+        List<PassengerRequest> snapshot = elevator.clearAllRequests();
+        assertEquals(2, snapshot.size());
+        snapshot.clear();
+        assertTrue(elevator.getPassengerList().isEmpty());
         assertTrue(elevator.getDestinationSet().isEmpty());
     }
 
