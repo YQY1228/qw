@@ -1,0 +1,48 @@
+# IDE
+.idea/
+.eclipse
+.project
+.classpath
+.c9/
+*.swp
+*.swo
+*.swn
+*~
+.vscode/
+*.code-workspace
+
+# Build
+target/
+build/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar
+*.tar.gz
+
+# Maven
+.m2/
+pom.xml.tag
+pom.xml.releaseBackup
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+
+# Gradle
+.gradle/
+*.gradle
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+.Trashes
+ehthumbs.db
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+*.log
