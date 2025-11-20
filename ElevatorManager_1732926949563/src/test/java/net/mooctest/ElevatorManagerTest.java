@@ -161,6 +161,61 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testElevatorManagerRegisterDuplicateOverrides() {
+        // 中文注释：验证重复注册会覆盖旧电梯实例
+        ElevatorManager manager = ElevatorManager.getInstance();
+        Elevator first = createElevator(200, 2);
+        Elevator second = createElevator(200, 9);
+        manager.registerElevator(first);
+        manager.registerElevator(second);
+        assertSame(second, manager.getElevatorById(200));
+    }
+
+    @Test
+    public void testElevatorManagerCollectionReflectsRegistrations() {
+        // 中文注释：验证getAllElevators返回的集合会实时反映新增电梯
+        ElevatorManager manager = ElevatorManager.getInstance();
+        Collection<Elevator> collection = manager.getAllElevators();
+        Elevator e1 = createElevator(201, 4);
+        Elevator e2 = createElevator(202, 5);
+        manager.registerElevator(e1);
+        assertTrue(collection.contains(e1));
+        manager.registerElevator(e2);
+        assertTrue(collection.contains(e2));
+    }
+
+    @Test
+    public void testElevatorManagerConcurrentGetInstance() throws Exception {
+        // 中文注释：多线程并发获取单例也应保持同一实例
+        Field instanceField = ElevatorManager.class.getDeclaredField("instance");
+        instanceField.setAccessible(true);
+        instanceField.set(null, null);
+
+        List<ElevatorManager> instances = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(5);
+        for (int i = 0; i < 5; i++) {
+            new Thread(() -> {
+                try {
+                    startLatch.await();
+                    instances.add(ElevatorManager.getInstance());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneLatch.countDown();
+                }
+            }).start();
+        }
+        startLatch.countDown();
+        assertTrue(doneLatch.await(2, TimeUnit.SECONDS));
+        ElevatorManager expected = instances.get(0);
+        for (ElevatorManager manager : instances) {
+            assertSame(expected, manager);
+        }
+        instanceField.set(null, null);
+    }
+
+    @Test
     public void testAnalyticsEnginePeakDetectionAndReport() throws Exception {
         // 中文注释：验证统计引擎记录报表与高峰判断逻辑
         AnalyticsEngine engine = AnalyticsEngine.getInstance();
@@ -1057,6 +1112,8 @@ public class ElevatorManagerTest {
     private static class TestMaintenanceManager extends MaintenanceManager {
         private final List<MaintenanceTask> notified = new ArrayList<>();
         private final List<MaintenanceRecord> records = new ArrayList<>();
+        private final List<String> notifications = new ArrayList<>();
+        private boolean performed;
 
         @Override
         public void processTasks() {
@@ -1077,10 +1134,12 @@ public class ElevatorManagerTest {
         @Override
         public void notifyMaintenancePersonnel(MaintenanceTask task) {
             notified.add(task);
+            notifications.add("notify-" + task.getElevatorId());
         }
 
         @Override
         public void performMaintenance(MaintenanceTask task) {
+            performed = true;
             records.add(new MaintenanceRecord(task.getElevatorId(), System.currentTimeMillis(), task.getDescription()));
         }
 
@@ -1090,6 +1149,14 @@ public class ElevatorManagerTest {
 
         public List<MaintenanceRecord> getRecords() {
             return records;
+        }
+
+        public List<String> getNotificationLog() {
+            return notifications;
+        }
+
+        public boolean isPerformed() {
+            return performed;
         }
     }
 
@@ -1103,6 +1170,7 @@ public class ElevatorManagerTest {
 
         assertEquals(1, manager.getNotified().size());
         assertEquals(1, manager.getRecords().size());
+        assertTrue(manager.isPerformed());
 
         EventBus.Event event = new EventBus.Event(EventType.ELEVATOR_FAULT, elevator);
         manager.onEvent(event);
@@ -1126,6 +1194,8 @@ public class ElevatorManagerTest {
         } catch (Exception e) {
             fail("无法读取维护记录: " + e.getMessage());
         }
+
+        assertTrue(manager.getNotificationLog().stream().anyMatch(s -> s.contains(String.valueOf(elevator.getId()))));
 
         // 关闭内部执行器，避免后台线程影响后续测试
         try {
@@ -1169,6 +1239,63 @@ public class ElevatorManagerTest {
         } catch (Exception e) {
             fail("无法关闭维护管理器线程: " + e.getMessage());
         }
+    }
+
+    @Test
+    public void testMaintenanceManagerTaskQueueHasFIFOOrdering() throws Exception {
+        // 中文注释：验证任务队列按照 FIFO 顺序处理
+        TestMaintenanceManager manager = new TestMaintenanceManager();
+        Elevator e1 = createElevator(70, 1);
+        Elevator e2 = createElevator(71, 2);
+        manager.scheduleMaintenance(e1);
+        manager.scheduleMaintenance(e2);
+        manager.processTasks();
+        List<MaintenanceManager.MaintenanceTask> notified = manager.getNotified();
+        assertEquals(2, notified.size());
+        assertEquals(e1.getId(), notified.get(0).getElevatorId());
+        assertEquals(e2.getId(), notified.get(1).getElevatorId());
+        ExecutorService executor = getPrivateField(manager, "executorService");
+        executor.shutdownNow();
+    }
+
+    @Test
+    public void testMaintenanceManagerScheduleAddsToQueueBeforeProcessing() throws Exception {
+        // 中文注释：验证调度任务会按顺序进入队列
+        class PassiveMaintenanceManager extends MaintenanceManager {
+            private final CountDownLatch started = new CountDownLatch(1);
+            private final CountDownLatch release = new CountDownLatch(1);
+
+            @Override
+            public void processTasks() {
+                started.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            void awaitStart() throws InterruptedException {
+                assertTrue("后台线程未启动", started.await(2, TimeUnit.SECONDS));
+            }
+
+            void allowExit() {
+                release.countDown();
+            }
+        }
+        PassiveMaintenanceManager manager = new PassiveMaintenanceManager();
+        manager.awaitStart();
+        Elevator e1 = createElevator(75, 5);
+        Elevator e2 = createElevator(76, 6);
+        manager.scheduleMaintenance(e1);
+        manager.scheduleMaintenance(e2);
+        @SuppressWarnings("unchecked")
+        Queue<MaintenanceManager.MaintenanceTask> queue = getPrivateField(manager, "taskQueue");
+        assertEquals(2, queue.size());
+        assertEquals(e1.getId(), queue.peek().getElevatorId());
+        manager.allowExit();
+        ExecutorService executor = getPrivateField(manager, "executorService");
+        executor.shutdownNow();
     }
 
     private static class StubScheduler extends Scheduler {
