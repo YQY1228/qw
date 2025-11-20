@@ -1171,25 +1171,26 @@ public class ElevatorManagerTest {
         }
     }
 
+    private static class StubScheduler extends Scheduler {
+        private boolean triggered;
+
+        StubScheduler() {
+            super(new ArrayList<>(), 0, new NearestElevatorStrategy());
+        }
+
+        @Override
+        public void executeEmergencyProtocol() {
+            triggered = true;
+        }
+
+        boolean isTriggered() {
+            return triggered;
+        }
+    }
+
     @Test
     public void testSecurityMonitorHandlesEmergencyEvent() throws Exception {
         // 中文注释：验证安全监控可响应事件并触发后续流程
-        class StubScheduler extends Scheduler {
-            private boolean triggered;
-
-            StubScheduler() {
-                super(new ArrayList<>(), 0, new NearestElevatorStrategy());
-            }
-
-            @Override
-            public void executeEmergencyProtocol() {
-                triggered = true;
-            }
-
-            boolean isTriggered() {
-                return triggered;
-            }
-        }
         StubScheduler fakeScheduler = new StubScheduler();
         Field schedulerInstance = Scheduler.class.getDeclaredField("instance");
         schedulerInstance.setAccessible(true);
@@ -1215,6 +1216,55 @@ public class ElevatorManagerTest {
         ExecutorService executor = getPrivateField(monitor, "executorService");
         executor.shutdownNow();
         schedulerInstance.set(null, null);
+    }
+
+    @Test
+    public void testSecurityMonitorLocksAndNotifications() throws Exception {
+        // 中文注释：验证安全监控对锁与通知的使用
+        StubScheduler stubScheduler = new StubScheduler();
+        Field schedulerInstance = Scheduler.class.getDeclaredField("instance");
+        schedulerInstance.setAccessible(true);
+        schedulerInstance.set(null, stubScheduler);
+
+        SecurityMonitor monitor = new SecurityMonitor();
+        NotificationService service = NotificationService.getInstance();
+        @SuppressWarnings("unchecked")
+        List<NotificationService.NotificationChannel> channels = getPrivateField(service, "channels");
+        List<NotificationService.NotificationChannel> backup = new ArrayList<>(channels);
+        AtomicReference<NotificationService.Notification> captured = new AtomicReference<>();
+        NotificationService.NotificationChannel spyChannel = new NotificationService.NotificationChannel() {
+            @Override
+            public boolean supports(NotificationService.NotificationType type) {
+                return true;
+            }
+
+            @Override
+            public void send(NotificationService.Notification notification) {
+                captured.set(notification);
+            }
+        };
+        channels.clear();
+        channels.add(spyChannel);
+
+        EventBus.getInstance().publish(new EventBus.Event(EventType.EMERGENCY, "lockTest"));
+        awaitCondition(() -> {
+            try {
+                List<SecurityMonitor.SecurityEvent> events = getPrivateField(monitor, "securityEvents");
+                return !events.isEmpty();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, 2000, "安全事件未记录");
+        List<SecurityMonitor.SecurityEvent> events = getPrivateField(monitor, "securityEvents");
+        assertEquals("lockTest", events.get(0).getData());
+        assertNotNull(captured.get());
+        assertTrue(stubScheduler.isTriggered());
+
+        ExecutorService executor = getPrivateField(monitor, "executorService");
+        executor.shutdownNow();
+        schedulerInstance.set(null, null);
+        channels.clear();
+        channels.addAll(backup);
     }
 
     @Test
@@ -1259,6 +1309,40 @@ public class ElevatorManagerTest {
         assertEquals("desc", event.getDescription());
         assertEquals(123L, event.getTimestamp());
         assertEquals("payload", event.getData());
+    }
+
+    @Test
+    public void testSecurityMonitorSingletonAutoSubscription() throws Exception {
+        // 中文注释：验证单例获取与自动订阅事件总线
+        StubScheduler stubScheduler = new StubScheduler();
+        Field schedulerInstance = Scheduler.class.getDeclaredField("instance");
+        schedulerInstance.setAccessible(true);
+        schedulerInstance.set(null, stubScheduler);
+
+        SecurityMonitor monitor1 = SecurityMonitor.getInstance();
+        SecurityMonitor monitor2 = SecurityMonitor.getInstance();
+        assertSame(monitor1, monitor2);
+
+        EventBus.getInstance().publish(new EventBus.Event(EventType.EMERGENCY, "singleton"));
+        awaitCondition(() -> {
+            try {
+                List<SecurityMonitor.SecurityEvent> events = getPrivateField(monitor1, "securityEvents");
+                return !events.isEmpty();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, 2000, "单例订阅未响应");
+
+        List<SecurityMonitor.SecurityEvent> events = getPrivateField(monitor1, "securityEvents");
+        assertEquals("singleton", events.get(events.size() - 1).getData());
+        assertTrue(stubScheduler.isTriggered());
+
+        ExecutorService executor = getPrivateField(monitor1, "executorService");
+        executor.shutdownNow();
+        schedulerInstance.set(null, null);
+        Field monitorInstance = SecurityMonitor.class.getDeclaredField("instance");
+        monitorInstance.setAccessible(true);
+        monitorInstance.set(null, null);
     }
 
     @Test
@@ -1311,5 +1395,25 @@ public class ElevatorManagerTest {
         manager.shutdown();
         Mockito.verify(executor).shutdown();
         Mockito.verify(executor, Mockito.never()).shutdownNow();
+    }
+
+    @Test
+    public void testThreadPoolManagerSingletonAndSubmit() throws Exception {
+        // 中文注释：验证单例模式与任务提交流程
+        Field instanceField = ThreadPoolManager.class.getDeclaredField("instance");
+        instanceField.setAccessible(true);
+        instanceField.set(null, null);
+
+        ThreadPoolManager singleton = ThreadPoolManager.getInstance();
+        assertSame(singleton, ThreadPoolManager.getInstance());
+
+        CountDownLatch latch = new CountDownLatch(2);
+        singleton.submitTask(latch::countDown);
+        singleton.submitTask(latch::countDown);
+        assertTrue("单例线程池应执行提交的任务", latch.await(2, TimeUnit.SECONDS));
+
+        ExecutorService executor = getPrivateField(singleton, "executorService");
+        executor.shutdownNow();
+        instanceField.set(null, null);
     }
 }
