@@ -378,6 +378,19 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testNotificationValueObjectAccessors() {
+        // 中文注释：验证通知实体的字段访问逻辑
+        List<String> recipients = Arrays.asList("ops@corp.com", "it@corp.com");
+        NotificationService.Notification notification = new NotificationService.Notification(
+                NotificationService.NotificationType.SYSTEM_UPDATE,
+                "系统更新",
+                recipients);
+        assertEquals(NotificationService.NotificationType.SYSTEM_UPDATE, notification.getType());
+        assertEquals("系统更新", notification.getMessage());
+        assertSame(recipients, notification.getRecipients());
+    }
+
+    @Test
     public void testPassengerRequestDerivedValues() {
         // 中文注释：验证乘客请求自动推导方向与字符串格式
         PassengerRequest up = new PassengerRequest(1, 5, Priority.HIGH, RequestType.DESTINATION_CONTROL);
@@ -575,6 +588,26 @@ public class ElevatorManagerTest {
         PassengerRequest request = new PassengerRequest(2, 9, Priority.MEDIUM, RequestType.STANDARD);
         scheduler.dispatchElevator(request);
         Mockito.verify(spyElevator, Mockito.never()).addDestination(Mockito.anyInt());
+    }
+
+    @Test
+    public void testSchedulerRedistributeRequestsResubmitsAll() throws Exception {
+        // 中文注释：验证故障电梯的请求会被完整再分配
+        Elevator managed = createElevator(101, 1);
+        List<PassengerRequest> dispatched = new ArrayList<>();
+        DispatchStrategy strategy = (list, request) -> {
+            dispatched.add(request);
+            return list.get(0);
+        };
+        Scheduler scheduler = new Scheduler(Collections.singletonList(managed), 4, strategy);
+        Elevator faulty = Mockito.mock(Elevator.class);
+        PassengerRequest r1 = new PassengerRequest(2, 6, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest r2 = new PassengerRequest(3, 7, Priority.HIGH, RequestType.DESTINATION_CONTROL);
+        Mockito.when(faulty.clearAllRequests()).thenReturn(Arrays.asList(r1, r2));
+
+        scheduler.redistributeRequests(faulty);
+        assertEquals(Arrays.asList(r1, r2), dispatched);
+        Mockito.verify(faulty).clearAllRequests();
     }
 
     @Test
@@ -854,6 +887,15 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testElevatorUpdateDirectionWhenMinEqualsCurrent() {
+        // 中文注释：验证最小目标楼层等于当前楼层时方向会被置为DOWN
+        Elevator elevator = createElevator(60, 5);
+        elevator.getDestinationSet().add(5);
+        elevator.updateDirection();
+        assertEquals(Direction.DOWN, elevator.getDirection());
+    }
+
+    @Test
     public void testElevatorLoadPassengersRespectsMaxLoad() throws Exception {
         // 中文注释：验证载客量达到上限时不会继续装载
         Scheduler schedulerMock = Mockito.mock(Scheduler.class);
@@ -872,6 +914,23 @@ public class ElevatorManagerTest {
         elevator.loadPassengers();
         assertTrue(passengerList.isEmpty());
         assertTrue(elevator.getDestinationSet().isEmpty());
+    }
+
+    @Test
+    public void testElevatorLoadPassengersUsesCurrentDirection() {
+        // 中文注释：验证载客时会根据当前方向向调度器取数
+        Scheduler schedulerMock = Mockito.mock(Scheduler.class);
+        Elevator elevator = new Elevator(56, schedulerMock);
+        elevator.setCurrentFloor(6);
+        elevator.setDirection(Direction.DOWN);
+        PassengerRequest down = new PassengerRequest(6, 2, Priority.LOW, RequestType.STANDARD);
+        Mockito.when(schedulerMock.getRequestsAtFloor(6, Direction.DOWN))
+                .thenReturn(Collections.singletonList(down));
+
+        elevator.loadPassengers();
+        Mockito.verify(schedulerMock).getRequestsAtFloor(6, Direction.DOWN);
+        assertTrue(elevator.getPassengerList().contains(down));
+        assertTrue(elevator.getDestinationSet().contains(down.getDestinationFloor()));
     }
 
     @Test
@@ -911,6 +970,37 @@ public class ElevatorManagerTest {
         snapshot.clear();
         assertTrue(elevator.getPassengerList().isEmpty());
         assertTrue(elevator.getDestinationSet().isEmpty());
+    }
+
+    @Test
+    public void testElevatorAddDestinationSignalsWaitingThread() throws Exception {
+        // 中文注释：验证addDestination会唤醒等待线程
+        Elevator elevator = createElevator(70, 1);
+        CountDownLatch waiting = new CountDownLatch(1);
+        CountDownLatch released = new CountDownLatch(1);
+
+        Thread waiter = new Thread(() -> {
+            ReentrantLock lock = elevator.getLock();
+            lock.lock();
+            try {
+                waiting.countDown();
+                elevator.getCondition().await();
+                released.countDown();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                lock.unlock();
+            }
+        });
+        waiter.start();
+
+        assertTrue(waiting.await(1, TimeUnit.SECONDS));
+        elevator.addDestination(8);
+        assertTrue("等待线程应被唤醒", released.await(2, TimeUnit.SECONDS));
+
+        waiter.interrupt();
+        waiter.join(1000);
+        assertTrue(elevator.getDestinationSet().contains(8));
     }
 
     @Test
