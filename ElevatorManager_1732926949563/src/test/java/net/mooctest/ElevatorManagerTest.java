@@ -18,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 
 import org.junit.Before;
@@ -715,6 +716,49 @@ public class ElevatorManagerTest {
         assertEquals(ElevatorStatus.EMERGENCY, observed.get());
         assertTrue(elevator.getPassengerList().isEmpty());
         assertEquals(Collections.singleton(1), new TreeSet<>(elevator.getDestinationSet()));
+    }
+
+    @Test
+    public void testElevatorRunHandlesEmergencyAndNormalMove() throws Exception {
+        // 中文注释：通过真实线程覆盖run方法的两个分支
+        Scheduler schedulerMock = Mockito.mock(Scheduler.class);
+        Elevator elevator = new Elevator(41, schedulerMock);
+        elevator.setCurrentFloor(2);
+        elevator.setDirection(Direction.DOWN);
+
+        Thread worker = new Thread(elevator, "elevator-runner");
+        worker.start();
+
+        ReentrantLock lock = elevator.getLock();
+        lock.lock();
+        try {
+            elevator.setStatus(ElevatorStatus.EMERGENCY);
+            elevator.getDestinationSet().add(1);
+            elevator.getCondition().signalAll();
+        } finally {
+            lock.unlock();
+        }
+
+        awaitCondition(() -> elevator.getCurrentFloor() == 1 && elevator.getStatus() == ElevatorStatus.IDLE,
+                6000, "紧急返回未完成");
+
+        lock.lock();
+        try {
+            elevator.setStatus(ElevatorStatus.MOVING);
+            elevator.setDirection(Direction.UP);
+            elevator.getDestinationSet().add(2);
+            elevator.getCondition().signalAll();
+        } finally {
+            lock.unlock();
+        }
+
+        awaitCondition(() -> elevator.getCurrentFloor() == 2,
+                6000, "常规移动未完成");
+
+        worker.interrupt();
+        worker.join(3000);
+        assertFalse("线程应已结束", worker.isAlive());
+        assertTrue("能耗应累加", elevator.getEnergyConsumption() > 0);
     }
 
     @Test
