@@ -227,6 +227,14 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testEventBusEventValueObject() {
+        // 中文注释：验证事件总线内部事件对象的取值逻辑
+        EventBus.Event event = new EventBus.Event(EventType.MAINTENANCE_REQUIRED, "data");
+        assertEquals(EventType.MAINTENANCE_REQUIRED, event.getType());
+        assertEquals("data", event.getData());
+    }
+
+    @Test
     public void testFloorQueuesPerDirection() {
         // 中文注释：验证楼层请求队列按照方向隔离，并在读取后清空
         Floor floor = new Floor(5);
@@ -244,6 +252,15 @@ public class ElevatorManagerTest {
         List<PassengerRequest> downList = floor.getRequests(Direction.DOWN);
         assertEquals(1, downList.size());
         assertSame(down, downList.get(0));
+    }
+
+    @Test
+    public void testFloorGetFloorNumberAndEmptyQueues() {
+        // 中文注释：验证楼层编号读取和空队列返回
+        Floor floor = new Floor(12);
+        assertEquals(12, floor.getFloorNumber());
+        assertTrue(floor.getRequests(Direction.UP).isEmpty());
+        assertTrue(floor.getRequests(Direction.DOWN).isEmpty());
     }
 
     @Test
@@ -1233,6 +1250,15 @@ public class ElevatorManagerTest {
             ExecutorService executor = getPrivateField(monitor, "executorService");
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    public void testSecurityMonitorSecurityEventValueObject() {
+        // 中文注释：验证安全事件实体封装的字段
+        SecurityMonitor.SecurityEvent event = new SecurityMonitor.SecurityEvent("desc", 123L, "payload");
+        assertEquals("desc", event.getDescription());
+        assertEquals(123L, event.getTimestamp());
+        assertEquals("payload", event.getData());
     }
 
     @Test
