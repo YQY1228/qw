@@ -115,7 +115,7 @@ public class ElevatorManagerTest {
     }
 
     private static class StubScheduler extends Scheduler {
-        private final Map<Integer, Map<Direction, Queue<PassengerRequest>>> manualRequests = new EnumMap<>(Integer.class);
+        private final Map<Integer, Map<Direction, Queue<PassengerRequest>>> manualRequests = new java.util.HashMap<>();
         private final List<PassengerRequest> dispatched = new ArrayList<>();
 
         StubScheduler(List<Elevator> elevators, int floors) {
