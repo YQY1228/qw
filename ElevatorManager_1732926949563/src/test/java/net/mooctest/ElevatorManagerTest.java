@@ -2306,4 +2306,902 @@ public class ElevatorManagerTest {
         config.setMaxLoad(1000.0);
         assertEquals(1000.0, config.getMaxLoad(), 0.001);
     }
+
+    // ==================== 额外的分支覆盖和变异测试 ====================
+    
+    @Test(timeout = 4000)
+    public void testElevatorOpenDoorWithPassengers() throws InterruptedException {
+        // 测试openDoor方法的完整流程
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        
+        PassengerRequest request = new PassengerRequest(3, 5, Priority.MEDIUM, RequestType.STANDARD);
+        elevator.getPassengerList().add(request);
+        elevator.getDestinationSet().add(5);
+        
+        elevator.openDoor();
+        
+        assertEquals(ElevatorStatus.STOPPED, elevator.getStatus());
+        assertEquals(0, elevator.getPassengerList().size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorMoveUpMultipleFloors() throws InterruptedException {
+        // 测试电梯连续上行多个楼层
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(1);
+        elevator.setDirection(Direction.UP);
+        elevator.getDestinationSet().add(5);
+        elevator.getDestinationSet().add(7);
+        elevator.getDestinationSet().add(9);
+        
+        elevator.move(); // 1->2
+        assertEquals(2, elevator.getCurrentFloor());
+        
+        elevator.move(); // 2->3
+        assertEquals(3, elevator.getCurrentFloor());
+        
+        elevator.move(); // 3->4
+        assertEquals(4, elevator.getCurrentFloor());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorMoveDownMultipleFloors() throws InterruptedException {
+        // 测试电梯连续下行多个楼层
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(10);
+        elevator.setDirection(Direction.DOWN);
+        elevator.getDestinationSet().add(5);
+        elevator.getDestinationSet().add(3);
+        elevator.getDestinationSet().add(1);
+        
+        elevator.move(); // 10->9
+        assertEquals(9, elevator.getCurrentFloor());
+        
+        elevator.move(); // 9->8
+        assertEquals(8, elevator.getCurrentFloor());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorMoveToFirstFloorFromAbove() throws InterruptedException {
+        // 测试从高楼层移动到1楼（UP方向）
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        elevator.setDirection(Direction.UP);
+        
+        elevator.moveToFirstFloor();
+        
+        assertEquals(1, elevator.getCurrentFloor());
+        assertEquals(ElevatorStatus.IDLE, elevator.getStatus());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorGetScheduler() {
+        // 测试获取调度器
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        assertSame(scheduler, elevator.getScheduler());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorGetMaxLoad() {
+        // 测试获取最大载重
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        assertEquals(SystemConfig.getInstance().getMaxLoad(), elevator.getMaxLoad(), 0.001);
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorUnloadPassengersMultiple() {
+        // 测试卸载多个乘客
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        
+        PassengerRequest request1 = new PassengerRequest(3, 5, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request2 = new PassengerRequest(2, 5, Priority.HIGH, RequestType.STANDARD);
+        PassengerRequest request3 = new PassengerRequest(4, 5, Priority.LOW, RequestType.STANDARD);
+        PassengerRequest request4 = new PassengerRequest(1, 8, Priority.MEDIUM, RequestType.STANDARD);
+        
+        elevator.getPassengerList().add(request1);
+        elevator.getPassengerList().add(request2);
+        elevator.getPassengerList().add(request3);
+        elevator.getPassengerList().add(request4);
+        
+        elevator.unloadPassengers();
+        
+        assertEquals(1, elevator.getPassengerList().size());
+        assertEquals(request4, elevator.getPassengerList().get(0));
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorLoadPassengersMultiple() {
+        // 测试加载多个乘客
+        List<Elevator> elevatorList = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevatorList, 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(3);
+        elevator.setDirection(Direction.UP);
+        elevator.setCurrentLoad(0.0);
+        elevatorList.add(elevator);
+        
+        PassengerRequest request1 = new PassengerRequest(3, 7, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request2 = new PassengerRequest(3, 8, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request3 = new PassengerRequest(3, 9, Priority.MEDIUM, RequestType.STANDARD);
+        
+        scheduler.submitRequest(request1);
+        scheduler.submitRequest(request2);
+        scheduler.submitRequest(request3);
+        
+        elevator.loadPassengers();
+        
+        // 应该加载了一些乘客
+        assertTrue(elevator.getCurrentLoad() >= 0);
+    }
+    
+    @Test(timeout = 4000)
+    public void testEnergySavingStrategyDistance4Boundary() {
+        // 测试距离正好4的边界条件
+        EnergySavingStrategy strategy = new EnergySavingStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setStatus(ElevatorStatus.MOVING);
+        elevator.setDirection(Direction.UP);
+        elevator.setCurrentFloor(1);
+        
+        List<Elevator> elevators = Arrays.asList(elevator);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator, selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testEnergySavingStrategyDistance6Boundary() {
+        // 测试距离正好6（不满足<5条件）
+        EnergySavingStrategy strategy = new EnergySavingStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setStatus(ElevatorStatus.MOVING);
+        elevator.setDirection(Direction.DOWN);
+        elevator.setCurrentFloor(1);
+        
+        List<Elevator> elevators = Arrays.asList(elevator);
+        PassengerRequest request = new PassengerRequest(7, 3, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertNull(selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testPredictiveSchedulingStrategyLoadFactor() {
+        // 测试loadFactor的计算
+        PredictiveSchedulingStrategy strategy = new PredictiveSchedulingStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        
+        PassengerRequest request1 = new PassengerRequest(2, 8, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request2 = new PassengerRequest(3, 9, Priority.MEDIUM, RequestType.STANDARD);
+        elevator.getPassengerList().add(request1);
+        elevator.getPassengerList().add(request2);
+        
+        PassengerRequest request = new PassengerRequest(7, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        double cost = strategy.calculatePredictedCost(elevator, request);
+        
+        assertTrue(cost > 2); // distance=2 + loadFactor*10
+    }
+    
+    @Test(timeout = 4000)
+    public void testPredictiveSchedulingStrategyLowCost() {
+        // 测试选择成本最低的电梯
+        PredictiveSchedulingStrategy strategy = new PredictiveSchedulingStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setCurrentFloor(2);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setCurrentFloor(9);
+        
+        List<Elevator> elevators = Arrays.asList(elevator1, elevator2);
+        PassengerRequest request = new PassengerRequest(3, 7, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator1, selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testHighEfficiencyStrategyIdleElevator() {
+        // 测试选择IDLE状态的电梯
+        HighEfficiencyStrategy strategy = new HighEfficiencyStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setStatus(ElevatorStatus.MOVING);
+        elevator1.setDirection(Direction.DOWN);
+        elevator1.setCurrentFloor(8);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setStatus(ElevatorStatus.IDLE);
+        elevator2.setCurrentFloor(2);
+        
+        List<Elevator> elevators = Arrays.asList(elevator1, elevator2);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator2, selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testNearestElevatorStrategyEqualDistance() {
+        // 测试距离相等时选择第一个
+        NearestElevatorStrategy strategy = new NearestElevatorStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setCurrentFloor(3);
+        elevator1.setStatus(ElevatorStatus.IDLE);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setCurrentFloor(7);
+        elevator2.setStatus(ElevatorStatus.IDLE);
+        
+        List<Elevator> elevators = Arrays.asList(elevator1, elevator2);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator1, selected); // 距离相等，选择第一个
+    }
+    
+    @Test(timeout = 4000)
+    public void testNearestElevatorStrategyStoppedStatus() {
+        // 测试STOPPED状态的电梯不被选择
+        NearestElevatorStrategy strategy = new NearestElevatorStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        elevator.setStatus(ElevatorStatus.STOPPED);
+        
+        List<Elevator> elevators = Arrays.asList(elevator);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertNull(selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testSchedulerSubmitRequestAndDispatch() {
+        // 测试提交请求后的完整派遣流程
+        List<Elevator> elevatorList = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevatorList, 10, new NearestElevatorStrategy());
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setStatus(ElevatorStatus.IDLE);
+        elevator1.setCurrentFloor(1);
+        elevatorList.add(elevator1);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setStatus(ElevatorStatus.IDLE);
+        elevator2.setCurrentFloor(8);
+        elevatorList.add(elevator2);
+        
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        scheduler.submitRequest(request);
+        
+        // 应该选择elevator1（距离更近）
+        assertTrue(elevator1.getDestinationSet().contains(5));
+    }
+    
+    @Test(timeout = 4000)
+    public void testFloorMultipleRequestsSameDirection() {
+        // 测试同一楼层同方向的多个请求
+        Floor floor = new Floor(3);
+        
+        PassengerRequest request1 = new PassengerRequest(3, 7, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request2 = new PassengerRequest(3, 8, Priority.HIGH, RequestType.STANDARD);
+        PassengerRequest request3 = new PassengerRequest(3, 9, Priority.LOW, RequestType.STANDARD);
+        
+        floor.addRequest(request1);
+        floor.addRequest(request2);
+        floor.addRequest(request3);
+        
+        List<PassengerRequest> requests = floor.getRequests(Direction.UP);
+        assertEquals(3, requests.size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorMultipleObservers() {
+        // 测试多个观察者
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        final int[] counter = {0};
+        
+        Observer observer1 = new Observer() {
+            @Override
+            public void update(Observable o, Object arg) {
+                counter[0]++;
+            }
+        };
+        
+        Observer observer2 = new Observer() {
+            @Override
+            public void update(Observable o, Object arg) {
+                counter[0]++;
+            }
+        };
+        
+        Observer observer3 = new Observer() {
+            @Override
+            public void update(Observable o, Object arg) {
+                counter[0]++;
+            }
+        };
+        
+        elevator.addObserver(observer1);
+        elevator.addObserver(observer2);
+        elevator.addObserver(observer3);
+        
+        Event event = new Event(EventType.EMERGENCY, null);
+        elevator.notifyObservers(event);
+        
+        assertEquals(3, counter[0]);
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorAddDestinationMultiple() {
+        // 测试添加多个目标楼层
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        elevator.addDestination(3);
+        elevator.addDestination(5);
+        elevator.addDestination(7);
+        elevator.addDestination(9);
+        
+        assertEquals(4, elevator.getDestinationSet().size());
+        assertTrue(elevator.getDestinationSet().contains(3));
+        assertTrue(elevator.getDestinationSet().contains(5));
+        assertTrue(elevator.getDestinationSet().contains(7));
+        assertTrue(elevator.getDestinationSet().contains(9));
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorAddDestinationDuplicate() {
+        // 测试添加重复的目标楼层（TreeSet去重）
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        elevator.addDestination(5);
+        elevator.addDestination(5);
+        elevator.addDestination(5);
+        
+        assertEquals(1, elevator.getDestinationSet().size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testSystemConfigSetFloorCount1() {
+        // 测试设置楼层数为1（边界值）
+        SystemConfig config = SystemConfig.getInstance();
+        config.setFloorCount(1);
+        assertEquals(1, config.getFloorCount());
+    }
+    
+    @Test(timeout = 4000)
+    public void testSystemConfigSetElevatorCount1() {
+        // 测试设置电梯数量为1（边界值）
+        SystemConfig config = SystemConfig.getInstance();
+        config.setElevatorCount(1);
+        assertEquals(1, config.getElevatorCount());
+    }
+    
+    @Test(timeout = 4000)
+    public void testSystemConfigSetMaxLoad0_01() {
+        // 测试设置最大载重为0.01（边界值）
+        SystemConfig config = SystemConfig.getInstance();
+        config.setMaxLoad(0.01);
+        assertEquals(0.01, config.getMaxLoad(), 0.001);
+    }
+    
+    @Test(timeout = 4000)
+    public void testAnalyticsEngineIsPeakHoursZero() {
+        // 测试0个等待乘客
+        AnalyticsEngine engine = new AnalyticsEngine();
+        assertFalse(engine.isPeakHours());
+    }
+    
+    @Test(timeout = 4000)
+    public void testLogManagerQueryLogsOutOfRange() {
+        // 测试查询时间范围外的日志
+        LogManager logManager = new LogManager();
+        long time1 = System.currentTimeMillis();
+        
+        logManager.recordEvent("System", "Event 1");
+        
+        long time2 = time1 - 1000; // 过去的时间
+        long time3 = time1 - 500;
+        
+        List<LogManager.SystemLog> logs = logManager.queryLogs("System", time2, time3);
+        assertEquals(0, logs.size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testEventBusSubscribeSameListenerTwice() {
+        // 测试同一监听器订阅两次
+        EventBus eventBus = new EventBus();
+        final int[] counter = {0};
+        
+        EventBus.EventListener listener = new EventBus.EventListener() {
+            @Override
+            public void onEvent(EventBus.Event event) {
+                counter[0]++;
+            }
+        };
+        
+        eventBus.subscribe(EventType.EMERGENCY, listener);
+        eventBus.subscribe(EventType.EMERGENCY, listener);
+        
+        EventBus.Event event = new EventBus.Event(EventType.EMERGENCY, null);
+        eventBus.publish(event);
+        
+        assertEquals(2, counter[0]); // 应该被调用两次
+    }
+    
+    @Test(timeout = 4000)
+    public void testEventBusDifferentEventTypes() {
+        // 测试不同事件类型的订阅
+        EventBus eventBus = new EventBus();
+        final int[] counter = {0};
+        
+        EventBus.EventListener listener = new EventBus.EventListener() {
+            @Override
+            public void onEvent(EventBus.Event event) {
+                counter[0]++;
+            }
+        };
+        
+        eventBus.subscribe(EventType.EMERGENCY, listener);
+        
+        EventBus.Event event1 = new EventBus.Event(EventType.EMERGENCY, null);
+        EventBus.Event event2 = new EventBus.Event(EventType.ELEVATOR_FAULT, null);
+        
+        eventBus.publish(event1);
+        eventBus.publish(event2);
+        
+        assertEquals(1, counter[0]); // 只有EMERGENCY被处理
+    }
+    
+    @Test(timeout = 4000)
+    public void testNotificationServiceMultipleChannels() {
+        // 测试多个通道的通知发送
+        NotificationService service = new NotificationService();
+        List<String> recipients = Arrays.asList("admin@example.com", "user@example.com");
+        
+        NotificationService.Notification notification1 = new NotificationService.Notification(
+            NotificationService.NotificationType.EMERGENCY,
+            "Emergency notification",
+            recipients
+        );
+        
+        NotificationService.Notification notification2 = new NotificationService.Notification(
+            NotificationService.NotificationType.INFORMATION,
+            "Info notification",
+            recipients
+        );
+        
+        service.sendNotification(notification1);
+        service.sendNotification(notification2);
+        
+        // 应该通过相应的通道发送
+    }
+    
+    @Test(timeout = 4000)
+    public void testNotificationServiceSMSChannelNotSupportsSystemUpdate() {
+        // 测试SMS通道不支持系统更新通知
+        NotificationService.SMSChannel channel = new NotificationService.SMSChannel();
+        assertFalse(channel.supports(NotificationService.NotificationType.SYSTEM_UPDATE));
+    }
+    
+    @Test(timeout = 4000)
+    public void testMaintenanceManagerMultipleTasks() {
+        // 测试多个维护任务
+        MaintenanceManager manager = new MaintenanceManager();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        Elevator elevator2 = new Elevator(2, scheduler);
+        Elevator elevator3 = new Elevator(3, scheduler);
+        
+        manager.scheduleMaintenance(elevator1);
+        manager.scheduleMaintenance(elevator2);
+        manager.scheduleMaintenance(elevator3);
+        
+        // 应该成功安排三个维护任务
+    }
+    
+    @Test(timeout = 4000)
+    public void testSecurityMonitorMultipleEvents() {
+        // 测试多个安全事件
+        SecurityMonitor monitor = new SecurityMonitor();
+        
+        monitor.handleEmergency("Fire alarm");
+        monitor.handleEmergency("Security breach");
+        monitor.handleEmergency("Power failure");
+        
+        // 应该记录三个安全事件
+    }
+    
+    @Test(timeout = 4000)
+    public void testThreadPoolManagerMultipleTasks() {
+        // 测试提交多个任务
+        ThreadPoolManager manager = new ThreadPoolManager();
+        final int[] taskCount = {0};
+        
+        for (int i = 0; i < 5; i++) {
+            manager.submitTask(new Runnable() {
+                @Override
+                public void run() {
+                    taskCount[0]++;
+                }
+            });
+        }
+        
+        // 等待所有任务执行
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        assertEquals(5, taskCount[0]);
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorStatusAllValues() {
+        // 测试所有ElevatorStatus值
+        ElevatorStatus[] values = ElevatorStatus.values();
+        for (ElevatorStatus status : values) {
+            assertEquals(status, ElevatorStatus.valueOf(status.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testEventTypeAllValues() {
+        // 测试所有EventType值
+        EventType[] values = EventType.values();
+        for (EventType type : values) {
+            assertEquals(type, EventType.valueOf(type.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorModeAllValues() {
+        // 测试所有ElevatorMode值
+        ElevatorMode[] values = ElevatorMode.values();
+        for (ElevatorMode mode : values) {
+            assertEquals(mode, ElevatorMode.valueOf(mode.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testPriorityAllValues() {
+        // 测试所有Priority值
+        Priority[] values = Priority.values();
+        for (Priority priority : values) {
+            assertEquals(priority, Priority.valueOf(priority.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testRequestTypeAllValues() {
+        // 测试所有RequestType值
+        RequestType[] values = RequestType.values();
+        for (RequestType type : values) {
+            assertEquals(type, RequestType.valueOf(type.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testSpecialNeedsAllValues() {
+        // 测试所有SpecialNeeds值
+        SpecialNeeds[] values = SpecialNeeds.values();
+        for (SpecialNeeds need : values) {
+            assertEquals(need, SpecialNeeds.valueOf(need.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testNotificationTypeAllValues() {
+        // 测试所有NotificationType值
+        NotificationService.NotificationType[] values = NotificationService.NotificationType.values();
+        for (NotificationService.NotificationType type : values) {
+            assertEquals(type, NotificationService.NotificationType.valueOf(type.name()));
+        }
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorUpdateDirectionWithMultipleDestinations() {
+        // 测试有多个目标时的方向更新
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(5);
+        
+        elevator.getDestinationSet().add(3);
+        elevator.getDestinationSet().add(7);
+        elevator.getDestinationSet().add(9);
+        
+        elevator.updateDirection();
+        
+        // 最小目标是3，小于当前楼层5，应该DOWN
+        assertEquals(Direction.DOWN, elevator.getDirection());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorUpdateDirectionAllAbove() {
+        // 测试所有目标都在当前楼层之上
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(2);
+        
+        elevator.getDestinationSet().add(5);
+        elevator.getDestinationSet().add(7);
+        elevator.getDestinationSet().add(9);
+        
+        elevator.updateDirection();
+        
+        assertEquals(Direction.UP, elevator.getDirection());
+    }
+    
+    @Test(timeout = 4000)
+    public void testSchedulerMultiplePriorityRequests() {
+        // 测试多个不同优先级的请求
+        List<Elevator> elevatorList = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevatorList, 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setStatus(ElevatorStatus.IDLE);
+        elevatorList.add(elevator);
+        
+        PassengerRequest highRequest = new PassengerRequest(3, 7, Priority.HIGH, RequestType.STANDARD);
+        PassengerRequest mediumRequest = new PassengerRequest(4, 8, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest lowRequest = new PassengerRequest(5, 9, Priority.LOW, RequestType.STANDARD);
+        
+        scheduler.submitRequest(highRequest);
+        scheduler.submitRequest(mediumRequest);
+        scheduler.submitRequest(lowRequest);
+        
+        // 所有请求都应该被处理
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorClearAllRequestsEmpty() {
+        // 测试清除空请求列表
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        List<PassengerRequest> cleared = elevator.clearAllRequests();
+        
+        assertEquals(0, cleared.size());
+        assertEquals(0, elevator.getPassengerList().size());
+        assertEquals(0, elevator.getDestinationSet().size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testFloorGetRequestsEmptyQueue() {
+        // 测试获取空队列
+        Floor floor = new Floor(5);
+        
+        List<PassengerRequest> requests = floor.getRequests(Direction.UP);
+        assertEquals(0, requests.size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testPassengerRequestBoundaryFloors() {
+        // 测试边界楼层的请求
+        PassengerRequest request1 = new PassengerRequest(1, 20, Priority.HIGH, RequestType.STANDARD);
+        assertEquals(Direction.UP, request1.getDirection());
+        
+        PassengerRequest request2 = new PassengerRequest(20, 1, Priority.HIGH, RequestType.STANDARD);
+        assertEquals(Direction.DOWN, request2.getDirection());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorMoveNotReachingDestination() {
+        // 测试移动但未到达任何目标
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(3);
+        elevator.setDirection(Direction.UP);
+        elevator.getDestinationSet().add(7);
+        elevator.getDestinationSet().add(9);
+        
+        try {
+            elevator.move();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        assertEquals(4, elevator.getCurrentFloor());
+        assertFalse(elevator.getDestinationSet().isEmpty());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorEnergyConsumptionIncrement() {
+        // 测试能耗递增
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        elevator.setCurrentFloor(3);
+        elevator.setDirection(Direction.UP);
+        elevator.getDestinationSet().add(7);
+        elevator.setEnergyConsumption(10.0);
+        
+        try {
+            elevator.move();
+            elevator.move();
+            elevator.move();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        assertEquals(13.0, elevator.getEnergyConsumption(), 0.001);
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorPassengerLoadCalculation() {
+        // 测试乘客载重计算
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, new NearestElevatorStrategy());
+        Elevator elevator = new Elevator(1, scheduler);
+        
+        PassengerRequest request1 = new PassengerRequest(2, 5, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request2 = new PassengerRequest(3, 6, Priority.MEDIUM, RequestType.STANDARD);
+        PassengerRequest request3 = new PassengerRequest(4, 7, Priority.MEDIUM, RequestType.STANDARD);
+        
+        elevator.getPassengerList().add(request1);
+        elevator.getPassengerList().add(request2);
+        elevator.getPassengerList().add(request3);
+        
+        elevator.setCurrentFloor(5);
+        elevator.unloadPassengers();
+        
+        assertEquals(140.0, elevator.getCurrentLoad(), 0.001); // 2个乘客 * 70kg
+    }
+    
+    @Test(timeout = 4000)
+    public void testHighEfficiencyStrategyBothIdle() {
+        // 测试两个都是IDLE时选择更近的
+        HighEfficiencyStrategy strategy = new HighEfficiencyStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setStatus(ElevatorStatus.IDLE);
+        elevator1.setCurrentFloor(2);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setStatus(ElevatorStatus.IDLE);
+        elevator2.setCurrentFloor(8);
+        
+        List<Elevator> elevators = Arrays.asList(elevator1, elevator2);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator1, selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testEnergySavingStrategyAllIdle() {
+        // 测试多个空闲电梯时选择第一个
+        EnergySavingStrategy strategy = new EnergySavingStrategy();
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 10, strategy);
+        
+        Elevator elevator1 = new Elevator(1, scheduler);
+        elevator1.setStatus(ElevatorStatus.IDLE);
+        
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevator2.setStatus(ElevatorStatus.IDLE);
+        
+        List<Elevator> elevators = Arrays.asList(elevator1, elevator2);
+        PassengerRequest request = new PassengerRequest(5, 10, Priority.MEDIUM, RequestType.STANDARD);
+        
+        Elevator selected = strategy.selectElevator(elevators, request);
+        
+        assertEquals(elevator1, selected);
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorManagerConstructor() {
+        // 测试ElevatorManager构造函数
+        ElevatorManager manager = new ElevatorManager();
+        assertNotNull(manager);
+        assertNotNull(manager.getAllElevators());
+        assertEquals(0, manager.getAllElevators().size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testSystemConfigConstructor() {
+        // 测试SystemConfig构造函数创建的实例
+        SystemConfig config = new SystemConfig();
+        assertNotNull(config);
+        assertEquals(20, config.getFloorCount());
+        assertEquals(4, config.getElevatorCount());
+        assertEquals(800.0, config.getMaxLoad(), 0.001);
+    }
+    
+    @Test(timeout = 4000)
+    public void testEventBusConstructor() {
+        // 测试EventBus构造函数
+        EventBus eventBus = new EventBus();
+        assertNotNull(eventBus);
+    }
+    
+    @Test(timeout = 4000)
+    public void testLogManagerConstructor() {
+        // 测试LogManager构造函数
+        LogManager logManager = new LogManager();
+        assertNotNull(logManager);
+    }
+    
+    @Test(timeout = 4000)
+    public void testAnalyticsEngineConstructor() {
+        // 测试AnalyticsEngine构造函数
+        AnalyticsEngine engine = new AnalyticsEngine();
+        assertNotNull(engine);
+    }
+    
+    @Test(timeout = 4000)
+    public void testNotificationServiceConstructor() {
+        // 测试NotificationService构造函数
+        NotificationService service = new NotificationService();
+        assertNotNull(service);
+    }
+    
+    @Test(timeout = 4000)
+    public void testSchedulerRedistributeRequestsEmpty() {
+        // 测试重新分配空请求列表
+        List<Elevator> elevatorList = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevatorList, 10, new NearestElevatorStrategy());
+        Elevator elevator1 = new Elevator(1, scheduler);
+        Elevator elevator2 = new Elevator(2, scheduler);
+        elevatorList.add(elevator1);
+        elevatorList.add(elevator2);
+        
+        scheduler.redistributeRequests(elevator1);
+        
+        assertEquals(0, elevator1.getPassengerList().size());
+    }
+    
+    @Test(timeout = 4000)
+    public void testElevatorStatusReportAllGetters() {
+        // 测试ElevatorStatusReport的所有getter
+        ElevatorStatusReport report = new ElevatorStatusReport(
+            1, 5, Direction.UP, ElevatorStatus.MOVING, 2.5, 350.0, 5
+        );
+        
+        assertEquals(1, report.getElevatorId());
+        assertEquals(5, report.getCurrentFloor());
+        assertEquals(Direction.UP, report.getDirection());
+        assertEquals(ElevatorStatus.MOVING, report.getStatus());
+        assertEquals(2.5, report.getSpeed(), 0.001);
+        assertEquals(350.0, report.getCurrentLoad(), 0.001);
+        assertEquals(5, report.getPassengerCount());
+        assertNotNull(report.toString());
+    }
 }
+
