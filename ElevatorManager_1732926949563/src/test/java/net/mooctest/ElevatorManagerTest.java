@@ -2,6 +2,8 @@ package net.mooctest;
 
 import static org.junit.Assert.*;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,9 +53,22 @@ public class ElevatorManagerTest {
         resetSingleton(Scheduler.class, "instance");
     }
 
+    private Field findField(Class<?> type, String fieldName) throws Exception {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                Field field = current.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(fieldName);
+    }
+
     private void resetSingleton(Class<?> clazz, String fieldName) throws Exception {
-        Field field = clazz.getDeclaredField(fieldName);
-        field.setAccessible(true);
+        Field field = findField(clazz, fieldName);
         field.set(null, null);
     }
 
@@ -71,28 +86,24 @@ public class ElevatorManagerTest {
     }
 
     private void shutdownExecutorField(Object target, String fieldName) throws Exception {
-        Field execField = target.getClass().getDeclaredField(fieldName);
-        execField.setAccessible(true);
+        Field execField = findField(target.getClass(), fieldName);
         ExecutorService executor = (ExecutorService) execField.get(target);
         executor.shutdownNow();
     }
 
     private void setFinalField(Object target, String fieldName, Object value) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
+        Field field = findField(target.getClass(), fieldName);
         field.set(target, value);
     }
 
     private void setStaticField(Class<?> clazz, String fieldName, Object value) throws Exception {
-        Field field = clazz.getDeclaredField(fieldName);
-        field.setAccessible(true);
+        Field field = findField(clazz, fieldName);
         field.set(null, value);
     }
 
     @SuppressWarnings("unchecked")
     private <T> T getPrivateField(Object target, String fieldName, Class<T> type) throws Exception {
-        Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
+        Field field = findField(target.getClass(), fieldName);
         return (T) field.get(target);
     }
 
@@ -121,6 +132,18 @@ public class ElevatorManagerTest {
         elevator.setDirection(direction);
         elevator.setStatus(status);
         return elevator;
+    }
+
+    private String captureOutput(Runnable runnable) {
+        PrintStream original = System.out;
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(buffer));
+        try {
+            runnable.run();
+        } finally {
+            System.setOut(original);
+        }
+        return buffer.toString();
     }
 
     // --------------------------------- Tests ---------------------------------
@@ -328,6 +351,36 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testElevatorUpdateDirectionEqualityBranch() throws Exception {
+        // 该测试验证updateDirection在目标楼层等于当前楼层时会选择向下分支
+        SystemConfig.getInstance().setMaxLoad(500);
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 5, new NearestElevatorStrategy());
+        FastElevator elevator = new FastElevator(31, scheduler);
+        elevator.setCurrentFloor(5);
+        elevator.setDirection(Direction.UP);
+        addDestination(elevator, 5);
+        elevator.updateDirection();
+        assertEquals(Direction.DOWN, elevator.getDirection());
+    }
+
+    @Test(timeout = 3000)
+    public void testElevatorRunLoopProcessesMove() throws Exception {
+        // 该测试验证run循环在收到目的地后能够执行一次移动并响应中断退出
+        SystemConfig.getInstance().setMaxLoad(500);
+        Scheduler scheduler = new Scheduler(new ArrayList<>(), 5, new NearestElevatorStrategy());
+        FastElevator elevator = new FastElevator(32, scheduler);
+        elevator.setCurrentFloor(1);
+        elevator.setStatus(ElevatorStatus.MOVING);
+        elevator.addDestination(2);
+        Thread worker = new Thread(elevator);
+        worker.start();
+        Thread.sleep(200);
+        worker.interrupt();
+        worker.join(1000);
+        assertTrue(elevator.getCurrentFloor() >= 2);
+    }
+
+    @Test
     public void testNearestElevatorStrategySelectionAndEligibility() {
         // 该测试验证最近电梯策略的距离比较和可派遣判定
         SystemConfig.getInstance().setMaxLoad(500);
@@ -349,6 +402,21 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testNearestElevatorStrategyNoEligibleElevator() {
+        // 该测试验证当所有电梯都不符合条件时返回null
+        SystemConfig.getInstance().setMaxLoad(500);
+        List<Elevator> elevators = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevators, 1, new NearestElevatorStrategy());
+        FastElevator downOne = buildElevator(35, scheduler, 8, Direction.DOWN, ElevatorStatus.MOVING);
+        FastElevator downTwo = buildElevator(36, scheduler, 6, Direction.DOWN, ElevatorStatus.MOVING);
+        elevators.add(downOne);
+        elevators.add(downTwo);
+        NearestElevatorStrategy strategy = new NearestElevatorStrategy();
+        PassengerRequest request = new PassengerRequest(3, 7, Priority.LOW, RequestType.STANDARD);
+        assertNull(strategy.selectElevator(elevators, request));
+    }
+
+    @Test
     public void testHighEfficiencyStrategyIsCloser() {
         // 该测试验证高效策略的距离比较函数以及筛选逻辑
         SystemConfig.getInstance().setMaxLoad(500);
@@ -363,6 +431,21 @@ public class ElevatorManagerTest {
         assertTrue(strategy.isCloser(first, second, request));
         Elevator selected = strategy.selectElevator(elevators, request);
         assertEquals(first, selected);
+    }
+
+    @Test
+    public void testHighEfficiencyStrategyNotCloserBranch() {
+        // 该测试验证isCloser在候选距离更远时会返回false
+        SystemConfig.getInstance().setMaxLoad(500);
+        List<Elevator> elevators = new ArrayList<>();
+        Scheduler scheduler = new Scheduler(elevators, 1, new NearestElevatorStrategy());
+        FastElevator near = buildElevator(33, scheduler, 4, Direction.UP, ElevatorStatus.MOVING);
+        FastElevator far = buildElevator(34, scheduler, 12, Direction.UP, ElevatorStatus.MOVING);
+        elevators.add(near);
+        elevators.add(far);
+        HighEfficiencyStrategy strategy = new HighEfficiencyStrategy();
+        PassengerRequest request = new PassengerRequest(6, 8, Priority.MEDIUM, RequestType.STANDARD);
+        assertFalse(strategy.isCloser(far, near, request));
     }
 
     @Test
@@ -450,6 +533,32 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testSchedulerSingletonInitialization() throws Exception {
+        // 该测试验证单例调度器的双重检验锁与默认实例
+        cleanupSingletons();
+        List<Elevator> elevators = new ArrayList<>();
+        Scheduler created = Scheduler.getInstance(elevators, 4, new NearestElevatorStrategy());
+        Scheduler reused = Scheduler.getInstance();
+        assertSame(created, reused);
+        Scheduler stillSame = Scheduler.getInstance(new ArrayList<>(), 9, new HighEfficiencyStrategy());
+        assertSame(created, stillSame);
+        Map<Integer, Floor> floors = getPrivateField(created, "floors", Map.class);
+        assertEquals(4, floors.size());
+    }
+
+    @Test
+    public void testSchedulerDispatchNoElevatorMessage() {
+        // 该测试验证当无可用电梯时会打印提示信息
+        SystemConfig.getInstance().setMaxLoad(500);
+        List<Elevator> elevators = new ArrayList<>();
+        RecordingStrategy strategy = new RecordingStrategy();
+        Scheduler scheduler = new Scheduler(elevators, 5, strategy);
+        PassengerRequest request = new PassengerRequest(1, 3, Priority.LOW, RequestType.STANDARD);
+        String output = captureOutput(() -> scheduler.dispatchElevator(request));
+        assertTrue(output.contains("No available"));
+    }
+
+    @Test
     public void testSchedulerRedistributeRequestsAndEmergencyProtocol() throws Exception {
         // 该测试验证调度器在电梯故障和紧急方案中的处理逻辑
         SystemConfig.getInstance().setMaxLoad(500);
@@ -528,6 +637,15 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testElevatorStatusReportToString() {
+        // 该测试验证电梯状态报告的toString包含关键字段
+        ElevatorStatusReport report = new ElevatorStatusReport(2, 9, Direction.DOWN, ElevatorStatus.STOPPED, 1.5, 200, 4);
+        String summary = report.toString();
+        assertTrue(summary.contains("elevatorId=2"));
+        assertTrue(summary.contains("currentFloor=9"));
+    }
+
+    @Test
     public void testNotificationServiceChannelRouting() throws Exception {
         // 该测试验证不同通知类型只会触发支持的通道
         NotificationService service = NotificationService.getInstance();
@@ -552,6 +670,28 @@ public class ElevatorManagerTest {
     }
 
     @Test
+    public void testNotificationChannelsStandalone() {
+        // 该测试验证默认短信与邮件通道的支持范围与输出
+        NotificationService.SMSChannel sms = new NotificationService.SMSChannel();
+        NotificationService.EmailChannel email = new NotificationService.EmailChannel();
+        NotificationService.Notification emergency = new NotificationService.Notification(
+                NotificationService.NotificationType.EMERGENCY,
+                "evacuate",
+                Arrays.asList("sms@a.com"));
+        NotificationService.Notification info = new NotificationService.Notification(
+                NotificationService.NotificationType.INFORMATION,
+                "daily",
+                Arrays.asList("mail@a.com"));
+        assertTrue(sms.supports(NotificationService.NotificationType.EMERGENCY));
+        assertFalse(sms.supports(NotificationService.NotificationType.INFORMATION));
+        String smsOutput = captureOutput(() -> sms.send(emergency));
+        assertTrue(smsOutput.contains("Sending SMS"));
+        assertTrue(email.supports(NotificationService.NotificationType.INFORMATION));
+        String mailOutput = captureOutput(() -> email.send(info));
+        assertTrue(mailOutput.contains("Sending email notification"));
+    }
+
+    @Test
     public void testMaintenanceManagerSchedulingAndEventHandling() throws Exception {
         // 该测试验证维修管理器对故障任务的排队与记录处理
         MaintenanceManager manager = MaintenanceManager.getInstance();
@@ -571,6 +711,21 @@ public class ElevatorManagerTest {
         EventBus.Event faultEvent = new EventBus.Event(EventType.ELEVATOR_FAULT, elevator);
         manager.onEvent(faultEvent);
         assertEquals(1, queue.size());
+    }
+
+    @Test(timeout = 4000)
+    public void testMaintenanceManagerProcessTasksLoop() throws Exception {
+        // 该测试验证processTasks循环能处理任务并在中断后退出
+        TestMaintenanceManager manager = new TestMaintenanceManager();
+        shutdownExecutorField(manager, "executorService");
+        Queue<MaintenanceManager.MaintenanceTask> queue = getPrivateField(manager, "taskQueue", Queue.class);
+        queue.add(new MaintenanceManager.MaintenanceTask(90, System.currentTimeMillis(), "loop"));
+        Thread worker = new Thread(manager::processTasks);
+        worker.start();
+        assertTrue(manager.awaitProcessing());
+        worker.interrupt();
+        worker.join(2000);
+        assertFalse(worker.isAlive());
     }
 
     @Test
@@ -654,6 +809,24 @@ public class ElevatorManagerTest {
         assertTrue(stub.shutdownNowCalled);
     }
 
+    @Test
+    public void testThreadPoolManagerShutdownInterruptedPath() throws Exception {
+        // 该测试验证线程池在awaitTermination抛出中断时的处理逻辑
+        ThreadPoolManager manager = new ThreadPoolManager();
+        Field execField = ThreadPoolManager.class.getDeclaredField("executorService");
+        execField.setAccessible(true);
+        ExecutorService original = (ExecutorService) execField.get(manager);
+        original.shutdownNow();
+        InterruptingExecutorService stub = new InterruptingExecutorService();
+        setFinalField(manager, "executorService", stub);
+        assertFalse(Thread.currentThread().isInterrupted());
+        manager.shutdown();
+        assertTrue(stub.shutdownCalled);
+        assertTrue(stub.shutdownNowCalled);
+        assertTrue(Thread.currentThread().isInterrupted());
+        Thread.interrupted();
+    }
+
     // --------------------------------- Helper Classes ---------------------------------
 
     private static class FastElevator extends Elevator {
@@ -722,6 +895,20 @@ public class ElevatorManagerTest {
         @Override
         public void executeEmergencyProtocol() {
             emergencyTriggered = true;
+        }
+    }
+
+    private static class TestMaintenanceManager extends MaintenanceManager {
+        private final CountDownLatch latch = new CountDownLatch(1);
+
+        @Override
+        public void performMaintenance(MaintenanceTask task) {
+            super.performMaintenance(task);
+            latch.countDown();
+        }
+
+        public boolean awaitProcessing() throws InterruptedException {
+            return latch.await(2, TimeUnit.SECONDS);
         }
     }
 
@@ -808,6 +995,42 @@ public class ElevatorManagerTest {
         @Override
         public boolean awaitTermination(long timeout, TimeUnit unit) {
             return false;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+    }
+
+    private static class InterruptingExecutorService extends AbstractExecutorService {
+        private boolean shutdownCalled;
+        private boolean shutdownNowCalled;
+
+        @Override
+        public void shutdown() {
+            shutdownCalled = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shutdownNowCalled = true;
+            return new ArrayList<>();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shutdownCalled;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shutdownNowCalled;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            throw new InterruptedException("forced");
         }
 
         @Override
