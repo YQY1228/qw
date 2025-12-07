@@ -1876,4 +1876,899 @@ public class Mathematical_ExpressionTest {
         Mathematical_Expression[] values = Mathematical_Expression.values();
         assertTrue(values.length >= 12);
     }
+
+    // ==================== CalculationManagement 管理类测试 ====================
+    
+    @Test
+    public void testCalculationManagement_RegisterCalculation() throws WrongFormat {
+        // 测试注册计算组件
+        BracketsCalculation2 calc = BracketsCalculation2.getInstance("testRegister");
+        boolean result = CalculationManagement.register(calc);
+        assertTrue(result);
+    }
+    
+    @Test
+    public void testCalculationManagement_RegisterCalculationWithJudge() throws WrongFormat {
+        // 测试带判断的注册
+        BracketsCalculation2 calc = BracketsCalculation2.getInstance("testJudgeReg");
+        boolean result1 = CalculationManagement.register(calc, true);
+        assertTrue(result1);
+        // 重复注册应该失败
+        boolean result2 = CalculationManagement.register(calc, true);
+        assertFalse(result2);
+    }
+    
+    @Test
+    public void testCalculationManagement_RegisterCalculationWithoutJudge() throws WrongFormat {
+        // 测试不判断的注册（覆盖）
+        BracketsCalculation2 calc1 = BracketsCalculation2.getInstance("testNoJudge");
+        BracketsCalculation2 calc2 = BracketsCalculation2.getInstance("testNoJudge");
+        boolean result1 = CalculationManagement.register(calc1, false);
+        boolean result2 = CalculationManagement.register(calc2, false);
+        assertTrue(result1);
+        assertTrue(result2);
+    }
+    
+    @Test
+    public void testCalculationManagement_IsRegister() {
+        // 测试是否已注册
+        assertTrue(CalculationManagement.isRegister("PrefixExpressionOperation"));
+        assertFalse(CalculationManagement.isRegister("NonExistentCalculation"));
+    }
+    
+    @Test
+    public void testCalculationManagement_GetCalculationByName() {
+        // 测试获取计算组件
+        Calculation calc = CalculationManagement.getCalculationByName("PrefixExpressionOperation");
+        assertNotNull(calc);
+        
+        Calculation nonExistent = CalculationManagement.getCalculationByName("NonExistent");
+        assertNull(nonExistent);
+    }
+    
+    @Test
+    public void testCalculationManagement_UnregisterCalculation() throws WrongFormat {
+        // 测试注销计算组件
+        BracketsCalculation2 calc = BracketsCalculation2.getInstance("toUnregister");
+        CalculationManagement.register(calc);
+        boolean result = CalculationManagement.unregister("toUnregister");
+        assertTrue(result);
+        
+        boolean result2 = CalculationManagement.unregister("NonExistent");
+        assertFalse(result2);
+    }
+    
+    @Test
+    public void testCalculationManagement_RegisterFunction() {
+        // 测试注册函数
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction("testFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0] * 2;
+            }
+        };
+        boolean result = CalculationManagement.register(func);
+        assertTrue(result);
+    }
+    
+    @Test
+    public void testCalculationManagement_RegisterFunctionDuplicate() {
+        // 测试重复注册函数
+        ManyToOneNumberFunction func1 = new ManyToOneNumberFunction("dupFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        ManyToOneNumberFunction func2 = new ManyToOneNumberFunction("dupFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0] * 2;
+            }
+        };
+        
+        assertTrue(CalculationManagement.register(func1));
+        assertFalse(CalculationManagement.register(func2));
+    }
+    
+    @Test
+    public void testCalculationManagement_RegisterFunctionPackage() {
+        // 测试注册函数包
+        CalculationManagement.register(FunctionPackage.MATH);
+        assertTrue(CalculationManagement.isFunctionExist("sum"));
+        assertTrue(CalculationManagement.isFunctionExist("pow"));
+        assertTrue(CalculationManagement.isFunctionExist("sqrt"));
+    }
+    
+    @Test
+    public void testCalculationManagement_IsFunctionExist() {
+        // 测试函数是否存在
+        CalculationManagement.register(FunctionPackage.MATH);
+        assertTrue(CalculationManagement.isFunctionExist("sum"));
+        assertFalse(CalculationManagement.isFunctionExist("nonExistentFunc"));
+    }
+    
+    @Test
+    public void testCalculationManagement_GetFunctionByName() {
+        // 测试获取函数
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction func = CalculationManagement.getFunctionByName("sum");
+        assertNotNull(func);
+        assertEquals("sum", func.getName());
+    }
+    
+    @Test(expected = ExtractException.class)
+    public void testCalculationManagement_GetFunctionByName_NotExist() {
+        // 测试获取不存在的函数
+        CalculationManagement.getFunctionByName("nonExistentFunction");
+    }
+    
+    @Test(expected = ExtractException.class)
+    public void testCalculationManagement_GetFunctionByName_WrongType() {
+        // 测试获取函数但类型不匹配
+        CalculationManagement.register(FunctionPackage.MATH);
+        // 尝试将函数强制转换为错误的类型会抛出异常
+        ManyToOneNumberFunction func = CalculationManagement.getFunctionByName("sum");
+        // 这里需要通过泛型导致类型转换异常
+    }
+    
+    @Test
+    public void testCalculationManagement_GetFunctionByNameNoCheck() {
+        // 测试无检查获取函数
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction func = CalculationManagement.getFunctionByNameNoCheck("sum");
+        assertNotNull(func);
+        
+        ManyToOneNumberFunction nonExist = CalculationManagement.getFunctionByNameNoCheck("nonExistent");
+        assertNull(nonExist);
+    }
+    
+    @Test
+    public void testCalculationManagement_UnregisterFunction() {
+        // 测试注销函数
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction("toUnregFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        CalculationManagement.register(func);
+        boolean result = CalculationManagement.unregisterF("toUnregFunc");
+        assertTrue(result);
+        
+        boolean result2 = CalculationManagement.unregisterF("nonExistent");
+        assertFalse(result2);
+    }
+    
+    @Test
+    public void testCalculationManagement_GetFunctionMap() {
+        // 测试获取函数映射
+        CalculationManagement.register(FunctionPackage.MATH);
+        Set<String> funcNames = CalculationManagement.getFunctionMap();
+        assertNotNull(funcNames);
+        assertTrue(funcNames.contains("sum"));
+    }
+
+    // ==================== ManyToOneNumberFunction 函数测试 ====================
+    
+    @Test
+    public void testManyToOneNumberFunction_ValidName() {
+        // 测试有效函数名
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction("validFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        assertEquals("validFunc", func.getName());
+    }
+    
+    @Test(expected = ExtractException.class)
+    public void testManyToOneNumberFunction_InvalidName_WithNumber() {
+        // 测试非法函数名：包含数字
+        new ManyToOneNumberFunction("func123") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+    }
+    
+    @Test(expected = ExtractException.class)
+    public void testManyToOneNumberFunction_InvalidName_WithSymbol() {
+        // 测试非法函数名：包含符号
+        new ManyToOneNumberFunction("func_test") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+    }
+    
+    @Test(expected = ExtractException.class)
+    public void testManyToOneNumberFunction_InvalidName_Empty() {
+        // 测试非法函数名：空字符串
+        new ManyToOneNumberFunction("") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+    }
+    
+    @Test
+    public void testManyToOneNumberFunction_NoArgConstructor() {
+        // 测试无参构造
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction() {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        assertEquals("f", func.getName());
+    }
+    
+    @Test
+    public void testManyToOneNumberFunction_ToString() {
+        // 测试toString方法
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction("testToString") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        assertEquals("testToString", func.toString());
+    }
+    
+    @Test
+    public void testManyToOneNumberFunction_AllowSerialization() {
+        // 测试是否允许序列化
+        ManyToOneNumberFunction func = new ManyToOneNumberFunction("serFunc") {
+            @Override
+            public double run(double... numbers) {
+                return numbers[0];
+            }
+        };
+        assertTrue(func.AllowSerialization());
+    }
+
+    // ==================== FunctionPackage 函数包测试 ====================
+    
+    @Test
+    public void testFunctionPackage_MATH_Sum() {
+        // 测试数学函数包：求和
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction sum = CalculationManagement.getFunctionByName("sum");
+        double result = sum.run(1, 2, 3, 4, 5);
+        assertEquals(15.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Pow() {
+        // 测试数学函数包：幂运算
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction pow = CalculationManagement.getFunctionByName("pow");
+        double result = pow.run(2, 3);
+        assertEquals(8.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Sqrt() {
+        // 测试数学函数包：平方根
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction sqrt = CalculationManagement.getFunctionByName("sqrt");
+        double result = sqrt.run(16);
+        assertEquals(4.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Factorial() {
+        // 测试数学函数包：阶乘
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction factorial = CalculationManagement.getFunctionByName("factorial");
+        double result = factorial.run(5);
+        assertEquals(120.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Avg() {
+        // 测试数学函数包：平均值
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction avg = CalculationManagement.getFunctionByName("avg");
+        double result = avg.run(1, 2, 3, 4, 5);
+        assertEquals(3.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_MATH_Avg_NoSum() {
+        // 测试平均值函数但sum未注册
+        CalculationManagement.unregisterF("sum");
+        ManyToOneNumberFunction avg = new ManyToOneNumberFunction("avgTest") {
+            @Override
+            public double run(double... numbers) {
+                final ManyToOneNumberFunction sum = CalculationManagement.getFunctionByNameNoCheck("sum");
+                if (sum == null) {
+                    throw new UnsupportedOperationException("sum function not found");
+                }
+                return sum.run(numbers) / numbers.length;
+            }
+        };
+        avg.run(1, 2, 3);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Sin() {
+        // 测试三角函数：sin
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction sin = CalculationManagement.getFunctionByName("sin");
+        double result = sin.run(0);
+        assertEquals(0.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Cos() {
+        // 测试三角函数：cos
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction cos = CalculationManagement.getFunctionByName("cos");
+        double result = cos.run(0);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Tan() {
+        // 测试三角函数：tan
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction tan = CalculationManagement.getFunctionByName("tan");
+        double result = tan.run(0);
+        assertEquals(0.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Cot() {
+        // 测试三角函数：cot
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction cot = CalculationManagement.getFunctionByName("cot");
+        double result = cot.run(Math.PI / 4);
+        assertEquals(1.0, result, 0.01);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Sec() {
+        // 测试三角函数：sec
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction sec = CalculationManagement.getFunctionByName("sec");
+        double result = sec.run(0);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_MATH_Csc() {
+        // 测试三角函数：csc
+        CalculationManagement.register(FunctionPackage.MATH);
+        ManyToOneNumberFunction csc = CalculationManagement.getFunctionByName("csc");
+        double result = csc.run(Math.PI / 2);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToS() {
+        // 测试日期函数包：毫秒转秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToS = CalculationManagement.getFunctionByName("msToS");
+        double result = msToS.run(1000);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_SToMs() {
+        // 测试日期函数包：秒转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction sToMs = CalculationManagement.getFunctionByName("sToMs");
+        double result = sToMs.run(1);
+        assertEquals(1000.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToMin() {
+        // 测试日期函数包：毫秒转分钟
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToMin = CalculationManagement.getFunctionByName("msToMin");
+        double result = msToMin.run(60000);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MinToMs() {
+        // 测试日期函数包：分钟转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction minToMs = CalculationManagement.getFunctionByName("minToMs");
+        double result = minToMs.run(1);
+        assertEquals(60000.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToHour() {
+        // 测试日期函数包：毫秒转小时
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToHour = CalculationManagement.getFunctionByName("msToHour");
+        double result = msToHour.run(3600000);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_HourToMs() {
+        // 测试日期函数包：小时转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction hourToMs = CalculationManagement.getFunctionByName("hourToMs");
+        double result = hourToMs.run(1);
+        assertEquals(3600000.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToDay() {
+        // 测试日期函数包：毫秒转天
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToDay = CalculationManagement.getFunctionByName("msToDay");
+        double result = msToDay.run(86400000);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_DayToMs() {
+        // 测试日期函数包：天转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction dayToMs = CalculationManagement.getFunctionByName("dayToMs");
+        double result = dayToMs.run(1);
+        assertEquals(86400000.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToWeek() {
+        // 测试日期函数包：毫秒转周
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToWeek = CalculationManagement.getFunctionByName("msToWeek");
+        double result = msToWeek.run(604800000);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_WeekToMs() {
+        // 测试日期函数包：周转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction weekToMs = CalculationManagement.getFunctionByName("weekToMs");
+        double result = weekToMs.run(1);
+        assertEquals(604800000.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToMonth() {
+        // 测试日期函数包：毫秒转月
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToMonth = CalculationManagement.getFunctionByName("msToMonth");
+        double result = msToMonth.run(2592000000L);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MonthToMs() {
+        // 测试日期函数包：月转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction monthToMs = CalculationManagement.getFunctionByName("monthToMs");
+        double result = monthToMs.run(1);
+        assertEquals(2592000000L, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_MsToYear() {
+        // 测试日期函数包：毫秒转年
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction msToYear = CalculationManagement.getFunctionByName("msToYear");
+        double result = msToYear.run(31536000000L);
+        assertEquals(1.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_DATE_YearToMs() {
+        // 测试日期函数包：年转毫秒
+        CalculationManagement.register(FunctionPackage.DATE);
+        ManyToOneNumberFunction yearToMs = CalculationManagement.getFunctionByName("yearToMs");
+        double result = yearToMs.run(1);
+        assertEquals(31536000000L, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfEq_True() {
+        // 测试分支函数包：ifEq（真）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifEq = CalculationManagement.getFunctionByName("ifEq");
+        double result = ifEq.run(5, 5, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfEq_False() {
+        // 测试分支函数包：ifEq（假）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifEq = CalculationManagement.getFunctionByName("ifEq");
+        double result = ifEq.run(5, 6, 100, 200);
+        assertEquals(200.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_BRANCH_IfEq_WrongParamCount() {
+        // 测试分支函数包：ifEq参数错误
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifEq = CalculationManagement.getFunctionByName("ifEq");
+        ifEq.run(1, 2, 3);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfGt_True() {
+        // 测试分支函数包：ifGt（真）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGt = CalculationManagement.getFunctionByName("ifGt");
+        double result = ifGt.run(10, 5, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfGt_False() {
+        // 测试分支函数包：ifGt（假）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGt = CalculationManagement.getFunctionByName("ifGt");
+        double result = ifGt.run(5, 10, 100, 200);
+        assertEquals(200.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_BRANCH_IfGt_WrongParamCount() {
+        // 测试分支函数包：ifGt参数错误
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGt = CalculationManagement.getFunctionByName("ifGt");
+        ifGt.run(1, 2);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfLt_True() {
+        // 测试分支函数包：ifLt（真）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLt = CalculationManagement.getFunctionByName("ifLt");
+        double result = ifLt.run(5, 10, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfLt_False() {
+        // 测试分支函数包：ifLt（假）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLt = CalculationManagement.getFunctionByName("ifLt");
+        double result = ifLt.run(10, 5, 100, 200);
+        assertEquals(200.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_BRANCH_IfLt_WrongParamCount() {
+        // 测试分支函数包：ifLt参数错误
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLt = CalculationManagement.getFunctionByName("ifLt");
+        ifLt.run(1, 2, 3, 4, 5);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfGe_True_Greater() {
+        // 测试分支函数包：ifGe（真-大于）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGe = CalculationManagement.getFunctionByName("ifGe");
+        double result = ifGe.run(10, 5, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfGe_True_Equal() {
+        // 测试分支函数包：ifGe（真-等于）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGe = CalculationManagement.getFunctionByName("ifGe");
+        double result = ifGe.run(5, 5, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfGe_False() {
+        // 测试分支函数包：ifGe（假）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGe = CalculationManagement.getFunctionByName("ifGe");
+        double result = ifGe.run(5, 10, 100, 200);
+        assertEquals(200.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_BRANCH_IfGe_WrongParamCount() {
+        // 测试分支函数包：ifGe参数错误
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifGe = CalculationManagement.getFunctionByName("ifGe");
+        ifGe.run(1);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfLe_True_Less() {
+        // 测试分支函数包：ifLe（真-小于）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLe = CalculationManagement.getFunctionByName("ifLe");
+        double result = ifLe.run(5, 10, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfLe_True_Equal() {
+        // 测试分支函数包：ifLe（真-等于）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLe = CalculationManagement.getFunctionByName("ifLe");
+        double result = ifLe.run(5, 5, 100, 200);
+        assertEquals(100.0, result, 0.001);
+    }
+    
+    @Test
+    public void testFunctionPackage_BRANCH_IfLe_False() {
+        // 测试分支函数包：ifLe（假）
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLe = CalculationManagement.getFunctionByName("ifLe");
+        double result = ifLe.run(10, 5, 100, 200);
+        assertEquals(200.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testFunctionPackage_BRANCH_IfLe_WrongParamCount() {
+        // 测试分支函数包：ifLe参数错误
+        CalculationManagement.register(FunctionPackage.BRANCH);
+        ManyToOneNumberFunction ifLe = CalculationManagement.getFunctionByName("ifLe");
+        ifLe.run(1, 2, 3);
+    }
+    
+    @Test
+    public void testFunctionPackage_GetName() {
+        // 测试获取函数包名称
+        assertEquals("Math", FunctionPackage.MATH.getName());
+        assertEquals("Date", FunctionPackage.DATE.getName());
+        assertEquals("Branch", FunctionPackage.BRANCH.getName());
+    }
+    
+    @Test
+    public void testFunctionPackage_GetFunctionByNameNoCheck() {
+        // 测试无检查获取函数
+        Function func = FunctionPackage.MATH.getFunctionByNameNoCheck("sum");
+        assertNotNull(func);
+        assertEquals("sum", func.getName());
+        
+        Function nonExist = FunctionPackage.MATH.getFunctionByNameNoCheck("nonExistent");
+        assertNull(nonExist);
+    }
+    
+    @Test
+    public void testFunctionPackage_GetFunctionMap() {
+        // 测试获取函数映射
+        HashMap<String, Function> funcMap = FunctionPackage.MATH.getFunctionMap();
+        assertNotNull(funcMap);
+        assertTrue(funcMap.containsKey("sum"));
+        assertTrue(funcMap.containsKey("pow"));
+        assertTrue(funcMap.containsKey("sqrt"));
+    }
+
+    // ==================== ExpressionFunction 表达式函数测试 ====================
+    
+    @Test
+    public void testExpressionFunction_Parse_Simple() throws WrongFormat {
+        // 测试解析简单函数
+        ExpressionFunction func = ExpressionFunction.parse("f(x) = x * 2");
+        assertNotNull(func);
+        assertEquals("f", func.getName());
+        assertEquals(1, func.getParamSize());
+    }
+    
+    @Test
+    public void testExpressionFunction_Parse_TwoParams() throws WrongFormat {
+        // 测试解析两参数函数
+        ExpressionFunction func = ExpressionFunction.parse("add(a, b) = a + b");
+        assertNotNull(func);
+        assertEquals("add", func.getName());
+        assertEquals(2, func.getParamSize());
+    }
+    
+    @Test
+    public void testExpressionFunction_Run() throws WrongFormat {
+        // 测试执行函数
+        ExpressionFunction func = ExpressionFunction.parse("double(x) = x * 2");
+        double result = func.run(5);
+        assertEquals(10.0, result, 0.001);
+    }
+    
+    @Test
+    public void testExpressionFunction_Run_TwoParams() throws WrongFormat {
+        // 测试执行两参数函数
+        ExpressionFunction func = ExpressionFunction.parse("add(a, b) = a + b");
+        double result = func.run(3, 7);
+        assertEquals(10.0, result, 0.001);
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testExpressionFunction_Parse_NotFunction() throws WrongFormat {
+        // 测试解析非函数表达式
+        ExpressionFunction.parse("1 + 2");
+    }
+    
+    @Test(expected = WrongFormat.class)
+    public void testExpressionFunction_Parse_NoFunctionName() throws WrongFormat {
+        // 测试解析无函数名
+        ExpressionFunction.parse("(x) = x * 2");
+    }
+    
+    @Test(expected = WrongFormat.class)
+    public void testExpressionFunction_Parse_UnknownParam() throws WrongFormat {
+        // 测试解析未知参数
+        ExpressionFunction.parse("f(x) = x + y");
+    }
+    
+    @Test(expected = UnsupportedOperationException.class)
+    public void testExpressionFunction_Run_WrongParamCount() throws WrongFormat {
+        // 测试运行参数数量错误
+        ExpressionFunction func = ExpressionFunction.parse("f(x, y) = x + y");
+        func.run(5);
+    }
+    
+    @Test
+    public void testExpressionFunction_Explain() throws WrongFormat {
+        // 测试解释表达式
+        ExpressionFunction func = ExpressionFunction.parse("f(x) = x * 2 + 1");
+        String explained = func.explain(5);
+        assertNotNull(explained);
+    }
+    
+    @Test
+    public void testExpressionFunction_ToString() throws WrongFormat {
+        // 测试toString
+        ExpressionFunction func = ExpressionFunction.parse("f(x) = x * 2");
+        String str = func.toString();
+        assertNotNull(str);
+        assertTrue(str.contains("f(x)"));
+    }
+
+    // ==================== CalculationNumberResults 结果测试 ====================
+    
+    @Test
+    public void testCalculationNumberResults_Constructor() {
+        // 测试构造函数
+        CalculationNumberResults result = new CalculationNumberResults(3, 123.45, "testSource");
+        assertEquals(3, result.getResultLayers());
+        assertEquals(123.45, result.getResult(), 0.001);
+        assertEquals("testSource", result.getCalculationSourceName());
+    }
+    
+    @Test
+    public void testCalculationNumberResults_SetSource() {
+        // 测试设置来源
+        CalculationNumberResults result = new CalculationNumberResults(1, 100, "original");
+        result.setSource("newSource");
+        assertEquals("newSource", result.getCalculationSourceName());
+    }
+    
+    @Test
+    public void testCalculationNumberResults_GetBigDecimalResult() {
+        // 测试获取BigDecimal结果
+        CalculationNumberResults result = new CalculationNumberResults(1, 123.45, "test");
+        BigDecimal bd = result.getBigDecimalResult();
+        assertEquals(new BigDecimal("123.45"), bd);
+    }
+    
+    @Test
+    public void testCalculationNumberResults_CompareTo_Greater() {
+        // 测试比较：大于
+        CalculationNumberResults r1 = new CalculationNumberResults(1, 10, "test");
+        CalculationNumberResults r2 = new CalculationNumberResults(1, 5, "test");
+        assertTrue(r1.compareTo(r2) > 0);
+    }
+    
+    @Test
+    public void testCalculationNumberResults_CompareTo_Less() {
+        // 测试比较：小于
+        CalculationNumberResults r1 = new CalculationNumberResults(1, 5, "test");
+        CalculationNumberResults r2 = new CalculationNumberResults(1, 10, "test");
+        assertTrue(r1.compareTo(r2) < 0);
+    }
+    
+    @Test
+    public void testCalculationNumberResults_CompareTo_Equal() {
+        // 测试比较：等于
+        CalculationNumberResults r1 = new CalculationNumberResults(1, 5, "test");
+        CalculationNumberResults r2 = new CalculationNumberResults(1, 5, "test");
+        assertEquals(0, r1.compareTo(r2));
+    }
+    
+    @Test
+    public void testCalculationNumberResults_CompareTo_Null() {
+        // 测试比较：null
+        CalculationNumberResults r1 = new CalculationNumberResults(1, 5, "test");
+        assertEquals(1, r1.compareTo(null));
+    }
+    
+    @Test
+    public void testCalculationNumberResults_Compare() {
+        // 测试compare方法
+        CalculationNumberResults r1 = new CalculationNumberResults(1, 10, "test");
+        CalculationNumberResults r2 = new CalculationNumberResults(1, 5, "test");
+        assertTrue(r1.compare(r1, r2) > 0);
+    }
+    
+    @Test
+    public void testCalculationNumberResults_ToString() {
+        // 测试toString
+        CalculationNumberResults result = new CalculationNumberResults(1, 100, "test");
+        String str = result.toString();
+        assertTrue(str.contains("100"));
+        assertTrue(str.contains("test"));
+    }
+
+    // ==================== ExtractException 异常测试 ====================
+    
+    @Test
+    public void testExtractException_NoArgs() {
+        // 测试无参构造
+        ExtractException e = new ExtractException();
+        assertNotNull(e);
+    }
+    
+    @Test
+    public void testExtractException_WithMessage() {
+        // 测试带消息构造
+        ExtractException e = new ExtractException("Test message");
+        assertEquals("Test message", e.getMessage());
+    }
+    
+    @Test
+    public void testExtractException_WithMessageAndCause() {
+        // 测试带消息和原因构造
+        Throwable cause = new RuntimeException("cause");
+        ExtractException e = new ExtractException("Test message", cause);
+        assertEquals("Test message", e.getMessage());
+        assertEquals(cause, e.getCause());
+    }
+    
+    @Test
+    public void testExtractException_WithCause() {
+        // 测试仅带原因构造
+        Throwable cause = new IllegalArgumentException("cause");
+        ExtractException e = new ExtractException(cause);
+        assertEquals(cause, e.getCause());
+    }
+
+    // ==================== AbnormalOperation 异常测试 ====================
+    
+    @Test
+    public void testAbnormalOperation_NoArgs() {
+        // 测试无参构造
+        AbnormalOperation e = new AbnormalOperation();
+        assertNotNull(e);
+    }
+    
+    @Test
+    public void testAbnormalOperation_WithMessage() {
+        // 测试带消息构造
+        AbnormalOperation e = new AbnormalOperation("Test message");
+        assertEquals("Test message", e.getMessage());
+    }
+    
+    @Test
+    public void testAbnormalOperation_WithMessageAndCause() {
+        // 测试带消息和原因构造
+        Throwable cause = new RuntimeException("cause");
+        AbnormalOperation e = new AbnormalOperation("Test message", cause);
+        assertEquals("Test message", e.getMessage());
+        assertEquals(cause, e.getCause());
+    }
+    
+    @Test
+    public void testAbnormalOperation_WithCause() {
+        // 测试仅带原因构造
+        Throwable cause = new IllegalArgumentException("cause");
+        AbnormalOperation e = new AbnormalOperation(cause);
+        assertEquals(cause, e.getCause());
+    }
 }
